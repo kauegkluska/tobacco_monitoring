@@ -1,5 +1,6 @@
 from sqlalchemy import Column, Integer, String
-from app.core.database import Base
+from core.database import Base
+from sqlalchemy.orm import relationship
 
 class User(Base):
     __tablename__ = "users"
@@ -8,3 +9,5 @@ class User(Base):
     name = Column(String(100), nullable=False)
     login = Column(String(100), unique=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
+    
+    devices = relationship("Device", back_populates="user")

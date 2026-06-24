@@ -1,11 +1,15 @@
 from sqlalchemy import Integer, Column, ForeignKey
-from sqlalchemy import relationship
-from datetime import datetime
-from app.core.database import Base
+from sqlalchemy.orm import relationship
+from models.user import User
+from core.database import Base
 
 
 class Device(Base):
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("user.id"), nullable=False)
-    user = relationship("User", back_populates="device")
+    __tablename__ = "devices"
     
+    id = Column(Integer, primary_key=True, index=True)
+    users_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    
+    user = relationship("User", back_populates="devices")
+    
+    curing_units = relationship("CuringUnit", back_populates="device")

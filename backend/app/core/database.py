@@ -1,7 +1,17 @@
-from sqlalchemy import Table, Column, integer, String
-from database import metadata
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
 
-users = Table(
-    'users'
-    metadadta
+DATABASE_URL = "postgresql://postgres:123@localhost:5432/tobacco_monitoring"
+
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True
 )
+
+SessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=engine
+)
+
+Base = declarative_base()
