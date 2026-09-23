@@ -1,0 +1,48 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+
+:root {
+  color: #18332f;
+  background: #f2f4ed;
+  font-family: 'DM Sans', sans-serif;
+  font-synthesis: none;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  background: radial-gradient(circle at 15% 10%, #fffdf4 0, transparent 34%), #f2f4ed;
+}
+
+.dashboard { width: min(920px, calc(100% - 40px)); margin: 0 auto; padding: 72px 0 48px; }
+.header { display: flex; justify-content: space-between; align-items: end; gap: 24px; }
+.eyebrow { margin: 0 0 12px; color: #6e7d6a; font: 700 12px 'Space Mono', monospace; letter-spacing: 0; }
+h1 { margin: 0; font-size: clamp(2rem, 5vw, 3.5rem); line-height: 1; letter-spacing: 0; }
+.refresh-button { border: 0; border-radius: 6px; padding: 12px 16px; color: #f8f9f3; background: #18332f; font: 600 14px 'DM Sans', sans-serif; cursor: pointer; }
+.refresh-button:hover { background: #28534b; }
+.refresh-button:disabled { cursor: wait; opacity: .65; }
+.refresh-button span { margin-right: 5px; font-size: 18px; vertical-align: -1px; }
+.status { display: flex; align-items: center; gap: 8px; margin: 48px 0 16px; color: #6e7d6a; font: 12px 'Space Mono', monospace; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; background: #c88b32; }
+.status-dot.online { background: #3f9966; }
+.status-dot.error { background: #bd5947; }
+.reading-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.reading-card { min-height: 260px; padding: 28px; border-top: 4px solid; background: #fffdf4; box-shadow: 0 14px 34px #294d3d12; }
+.temperature-card { border-color: #e88b54; }
+.humidity-card { border-color: #5595a1; }
+.card-label { color: #6e7d6a; font-size: 15px; font-weight: 600; }
+.icon { display: inline-grid; place-items: center; width: 28px; height: 28px; margin-right: 8px; border-radius: 50%; color: #fffdf4; background: #18332f; font: 700 16px 'Space Mono', monospace; }
+.reading-value { margin: 62px 0 0; color: #18332f; font: 700 clamp(3.4rem, 9vw, 6.5rem)/.9 'Space Mono', monospace; letter-spacing: -4px; }
+.unit { margin-left: 8px; color: #6e7d6a; font-size: .32em; letter-spacing: 0; }
+.updated { margin: 18px 0 0; color: #6e7d6a; font: 12px 'Space Mono', monospace; }
+
+@media (max-width: 600px) {
+  .dashboard { width: min(100% - 28px, 440px); padding-top: 42px; }
+  .header { align-items: start; flex-direction: column; }
+  .status { margin-top: 36px; }
+  .reading-grid { grid-template-columns: 1fr; }
+  .reading-card { min-height: 200px; }
+  .reading-value { margin-top: 40px; }
+}

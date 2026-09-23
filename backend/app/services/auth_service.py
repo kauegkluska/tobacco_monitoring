@@ -9,7 +9,7 @@ def authenticate_user(db: Session, login: str, password: str):
     if not user:
         return None
     
-    if not verify_password(password, user.hashed_password):
+    if not verify_password(password, user.password_hash):
         return None
     
     return user

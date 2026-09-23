@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Monitor ambiental</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="dashboard">
+      <header class="header">
+        <div>
+          <p class="eyebrow">DADOS DO SENSOR</p>
+          <h1>Sistema Embarcado para Monitoramento Remoto de Estufas de Secagem de Tabaco</h1>
+        </div>
+        <button class="refresh-button" id="refresh-button" type="button" aria-label="Atualizar leituras">
+          <span aria-hidden="true">↻</span>
+          Atualizar
+        </button>
+      </header>
+
+      <section class="status" aria-live="polite">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="status-text">Conectando à API...</span>
+      </section>
+
+      <section class="reading-grid" aria-label="Leituras mais recentes">
+        <article class="reading-card temperature-card">
+          <div class="card-label"><span class="icon">°</span> Temperatura</div>
+          <p class="reading-value"><span id="temperature">--</span><span class="unit">°F</span></p>
+        </article>
+        <article class="reading-card humidity-card">
+          <div class="card-label"><span class="icon">%</span> Umidade</div>
+          <p class="reading-value"><span id="humidity">--</span><span class="unit">%</span></p>
+        </article>
+      </section>
+
+      <p class="updated">Última atualização: <time id="updated-at">--</time></p>
+    </main>
+    <script src="app.js?v=3"></script>
+  </body>
+</html>

@@ -1,2 +1,0 @@
-API_BASE_URL = "http://localhost:8000"
-REQUEST_TIMEOUT_SECONDS = 15.0
