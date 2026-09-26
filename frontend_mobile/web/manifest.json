@@ -1,11 +1,11 @@
 {
-    "name": "monitor_ambiental",
-    "short_name": "monitor_ambiental",
+    "name": "Monitor de Estufa",
+    "short_name": "Estufa",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "Monitoramento de temperatura, umidade e saídas da estufa de tabaco.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

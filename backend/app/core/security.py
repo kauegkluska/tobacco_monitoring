@@ -4,11 +4,33 @@ import hmac
 import secrets
 import time
 
-TOKEN_SECRET = b"monitor-estufa-tabaco-development-secret"
+from core.config import settings
+
+
+def _load_token_secret() -> bytes:
+    if settings.SECRET_KEY:
+        return settings.SECRET_KEY.encode()
+
+    secret_file = settings.DATA_DIR / "secret_key"
+    if secret_file.exists():
+        return secret_file.read_text(encoding="utf-8").strip().encode()
+
+    settings.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    secret = secrets.token_urlsafe(48)
+    secret_file.write_text(secret, encoding="utf-8")
+    return secret.encode()
+
+
+TOKEN_SECRET = _load_token_secret()
+
+ACCESS_TOKEN_SECONDS = settings.ACCESS_TOKEN_MINUTES * 60
+REFRESH_TOKEN_SECONDS = settings.REFRESH_TOKEN_DAYS * 24 * 60 * 60
+
 
 def decode_base64(value: str) -> bytes:
     padding = "=" * (-len(value) % 4)
     return base64.urlsafe_b64decode(value + padding)
+
 
 def hash_password(password: str) -> str:
     salt = secrets.token_bytes(16)
@@ -17,6 +39,7 @@ def hash_password(password: str) -> str:
         base64.urlsafe_b64encode(salt).decode(),
         base64.urlsafe_b64encode(digest).decode(),
     )
+
 
 def verify_password(plain_password: str, password_hash: str) -> bool:
     try:
@@ -30,8 +53,6 @@ def verify_password(plain_password: str, password_hash: str) -> bool:
     except (ValueError, TypeError):
         return False
 
-ACCESS_TOKEN_SECONDS = 15 * 60
-REFRESH_TOKEN_SECONDS = 30 * 24 * 60 * 60
 
 def _create_token(user_id: int, expires_in: int, token_type: str) -> str:
     payload = f"{user_id}:{int(time.time()) + expires_in}:{token_type}".encode()
@@ -40,11 +61,14 @@ def _create_token(user_id: int, expires_in: int, token_type: str) -> str:
     encoded_signature = base64.urlsafe_b64encode(signature).decode().rstrip("=")
     return f"{encoded_payload}.{encoded_signature}"
 
+
 def create_access_token(user_id: int) -> str:
     return _create_token(user_id, ACCESS_TOKEN_SECONDS, "access")
 
+
 def create_refresh_token(user_id: int) -> str:
     return _create_token(user_id, REFRESH_TOKEN_SECONDS, "refresh")
+
 
 def _read_token(token: str, expected_type: str) -> int | None:
     try:
@@ -60,11 +84,18 @@ def _read_token(token: str, expected_type: str) -> int | None:
     except (ValueError, TypeError):
         return None
 
+
 def get_user_id_from_token(token: str) -> int | None:
     return _read_token(token, "access")
+
 
 def get_user_id_from_refresh_token(token: str) -> int | None:
     return _read_token(token, "refresh")
 
+
 def hash_reset_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
+
+
+def keys_match(provided: str | None, expected: str) -> bool:
+    return provided is not None and hmac.compare_digest(provided.encode(), expected.encode())

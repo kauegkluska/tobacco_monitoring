@@ -2,41 +2,34 @@
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Monitor ambiental</title>
-    <link rel="stylesheet" href="styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="description" content="Painel de monitoramento de temperatura e umidade das estufas de secagem de tabaco." />
+    <meta name="theme-color" content="#2e7d32" />
+    <title>Monitor de Estufa</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%232e7d32'/%3E%3Cpath fill='%23fff' d='M7.05 9.05a6 6 0 0 0-.02 8.47c1.26-2.91 3.5-5.35 6.31-6.8a13.67 13.67 0 0 0-4.63 6.66c2.23 1.05 4.97.67 6.81-1.17C18.6 13.13 19 4.43 19 4.43s-8.7.4-11.95 4.62z'/%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght@8..144,400..700&display=swap" />
+    <link rel="stylesheet" href="css/styles.css" />
+    <script>
+      // Aplica o tema salvo antes de desenhar a página, para não piscar.
+      try {
+        const theme = JSON.parse(localStorage.getItem("monitor.prefs") || "{}").theme;
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch (_) {}
+    </script>
   </head>
   <body>
-    <main class="dashboard">
-      <header class="header">
-        <div>
-          <p class="eyebrow">DADOS DO SENSOR</p>
-          <h1>Sistema Embarcado para Monitoramento Remoto de Estufas de Secagem de Tabaco</h1>
-        </div>
-        <button class="refresh-button" id="refresh-button" type="button" aria-label="Atualizar leituras">
-          <span aria-hidden="true">↻</span>
-          Atualizar
-        </button>
-      </header>
-
-      <section class="status" aria-live="polite">
-        <span class="status-dot" id="status-dot"></span>
-        <span id="status-text">Conectando à API...</span>
-      </section>
-
-      <section class="reading-grid" aria-label="Leituras mais recentes">
-        <article class="reading-card temperature-card">
-          <div class="card-label"><span class="icon">°</span> Temperatura</div>
-          <p class="reading-value"><span id="temperature">--</span><span class="unit">°F</span></p>
-        </article>
-        <article class="reading-card humidity-card">
-          <div class="card-label"><span class="icon">%</span> Umidade</div>
-          <p class="reading-value"><span id="humidity">--</span><span class="unit">%</span></p>
-        </article>
-      </section>
-
-      <p class="updated">Última atualização: <time id="updated-at">--</time></p>
-    </main>
-    <script src="app.js?v=3"></script>
+    <div id="app" aria-live="polite">
+      <div class="boot">
+        <div class="boot-spinner" aria-hidden="true"></div>
+        <p>Carregando o painel…</p>
+      </div>
+    </div>
+    <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+    <noscript>
+      <p class="noscript">Ative o JavaScript do navegador para usar o painel.</p>
+    </noscript>
+    <script type="module" src="js/main.js"></script>
   </body>
 </html>

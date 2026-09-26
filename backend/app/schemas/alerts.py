@@ -1,28 +1,33 @@
-from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from schemas.common import UTCDateTime
 
 
 class AlertOut(BaseModel):
     id: int
-    timestamp: datetime
+    timestamp: UTCDateTime
     message: str
     type: str
     is_active: bool
     severity: str
-    acknowledged_at: datetime | None
-    resolved_at: datetime | None
+    value: float | None = None
+    threshold: float | None = None
+    acknowledged_at: UTCDateTime | None
+    resolved_at: UTCDateTime | None
     curing_unit_id: int
+    curing_unit_name: str | None = None
 
     model_config = {"from_attributes": True}
 
+
 class AlertCreate(BaseModel):
-    type: str
-    message: str
+    type: str = Field(min_length=1, max_length=50)
+    message: str = Field(min_length=1, max_length=255)
     curing_unit_id: int
     is_active: bool = True
-    severity: str = "warning"
+    severity: str = Field("warning", pattern="^(info|warning|critical)$")
+
 
 class AlertActionOut(BaseModel):
     message: str
     alert: AlertOut
-

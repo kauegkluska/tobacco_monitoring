@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from dependencies.auth import get_current_user
 from dependencies.db import get_db
+from models.alert import Alert
 from models.curing_unit import CuringUnit
 from models.device import Device
 from models.user import User
@@ -15,7 +16,7 @@ def get_owned_device(
 ) -> Device:
     device = db.query(Device).filter(Device.id == device_id, Device.user_id == user.id).first()
     if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
+        raise HTTPException(status_code=404, detail="Dispositivo não encontrado")
     return device
 
 
@@ -24,12 +25,23 @@ def get_owned_curing_unit(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> CuringUnit:
-    unit = (
-        db.query(CuringUnit)
-        .join(Device, CuringUnit.device_id == Device.id)
-        .filter(CuringUnit.id == id, Device.user_id == user.id)
+    unit = db.query(CuringUnit).filter(CuringUnit.id == id, CuringUnit.user_id == user.id).first()
+    if not unit:
+        raise HTTPException(status_code=404, detail="Estufa não encontrada")
+    return unit
+
+
+def get_owned_alert(
+    alert_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Alert:
+    alert = (
+        db.query(Alert)
+        .join(CuringUnit, Alert.curing_unit_id == CuringUnit.id)
+        .filter(Alert.id == alert_id, CuringUnit.user_id == user.id)
         .first()
     )
-    if not unit:
-        raise HTTPException(status_code=404, detail="Curing unit not found")
-    return unit
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alerta não encontrado")
+    return alert

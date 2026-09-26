@@ -1,16 +1,14 @@
 import json
-import re
-from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from dependencies.auth import get_current_user
+from core.clock import utcnow
+from dependencies.auth import get_current_user, require_gateway_key
 from dependencies.db import get_db
+from dependencies.permissions import get_owned_device
 from models.curing_unit import CuringUnit
 from models.device import Device
-from models.reading import Reading
 from models.user import User
 from schemas.devices import (
     DeviceCalibrationInput,
@@ -19,99 +17,17 @@ from schemas.devices import (
     DeviceThresholdsInput,
     DeviceUpdate,
 )
+from schemas.readings import IngestResult, TelemetryInput
+from services.device_service import (
+    find_device,
+    normalize_code,
+    normalize_mac,
+    parse_qr_string,
+    serialize_device,
+)
+from services.reading_service import ingest_telemetry
 
 router = APIRouter()
-
-
-class TelemetryInput(BaseModel):
-    mac_address: str | None = None
-    device_code: str | None = None
-    lora_id: str | None = None
-    temperature: float | None = None
-    humidity: float | None = None
-    battery_level: int | None = None
-    rssi: int | None = None
-    snr: float | None = None
-    curing_unit_id: int | None = None
-
-
-def _parse_qr_string(raw: str) -> dict:
-    result = {}
-    raw = raw.strip()
-    if raw.startswith("{") and raw.endswith("}"):
-        try:
-            data = json.loads(raw)
-            if "controller_id" in data:
-                result["device_code"] = data["controller_id"]
-            if "device_code" in data:
-                result["device_code"] = data["device_code"]
-            if "mac_address" in data:
-                result["mac_address"] = data["mac_address"]
-            if "lora_id" in data:
-                result["lora_id"] = data["lora_id"]
-            if "hardware_model" in data:
-                result["hardware_model"] = data["hardware_model"]
-            return result
-        except Exception:
-            pass
-
-    mac_match = re.search(r"([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})", raw)
-    if mac_match:
-        result["mac_address"] = mac_match.group(0).upper()
-
-    lora_match = re.search(r"0x[0-9A-Fa-f]{4,8}", raw)
-    if lora_match:
-        result["lora_id"] = lora_match.group(0).upper()
-
-    id_match = re.search(r"(?:ID|controller_id|id)=([A-Za-z0-9\-_]+)", raw, re.IGNORECASE)
-    if id_match:
-        result["device_code"] = id_match.group(1)
-    else:
-        code_match = re.search(r"(ESP32-[A-Za-z0-9\-_]+)", raw, re.IGNORECASE)
-        if code_match:
-            result["device_code"] = code_match.group(1)
-        elif " " not in raw and len(raw) < 40:
-            result["device_code"] = raw
-
-    return result
-
-
-def _serialize_device(device: Device, db: Session) -> dict:
-    unit = db.query(CuringUnit).filter(CuringUnit.device_id == device.id).first()
-    
-    # Check live online/offline status
-    status = "offline"
-    if device.last_seen_at:
-        if datetime.utcnow() - device.last_seen_at < timedelta(seconds=60):
-            status = "online"
-    
-    return {
-        "id": device.id,
-        "user_id": device.user_id,
-        "device_code": device.device_code or f"ESP32-M{device.id}",
-        "mac_address": device.mac_address or "Não configurado",
-        "lora_id": device.lora_id or "LoRa AU915",
-        "hardware_model": device.hardware_model or "Heltec WiFi LoRa 32 V3",
-        "firmware_version": device.firmware_version or "v2.1.0",
-        "battery_level": device.battery_level if device.battery_level is not None else 100,
-        "battery_status": device.battery_status or ("Normal" if (device.battery_level or 100) > 25 else "Bateria Baixa"),
-        "rssi": device.rssi if device.rssi is not None else -60,
-        "snr": device.snr if device.snr is not None else 9.5,
-        "frequency": device.frequency or "915.0 MHz",
-        "temp_min": device.temp_min if device.temp_min is not None else 35.0,
-        "temp_max": device.temp_max if device.temp_max is not None else 75.0,
-        "humidity_min": device.humidity_min if device.humidity_min is not None else 40.0,
-        "humidity_max": device.humidity_max if device.humidity_max is not None else 90.0,
-        "calibration_data": device.calibration_data,
-        "sensors_config": device.sensors_config or json.dumps([
-            {"name": "SHT40 (Temp & Umid)", "type": "SHT40", "status": "Operacional" if status == "online" else "Aguardando"},
-        ]),
-        "created_at": device.created_at,
-        "last_seen_at": device.last_seen_at,
-        "status": status,
-        "curing_unit_id": unit.id if unit else None,
-        "curing_unit_name": unit.name if unit else None,
-    }
 
 
 @router.post("/link", response_model=DeviceOut)
@@ -120,23 +36,23 @@ def link_device(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    parsed = {}
-    if data.raw_qr:
-        parsed = _parse_qr_string(data.raw_qr)
+    parsed = parse_qr_string(data.raw_qr) if data.raw_qr else {}
 
-    device_code = (data.controller_id or data.device_code or parsed.get("device_code") or "").strip()
-    mac_address = (data.mac_address or parsed.get("mac_address") or "").strip().upper() or None
-    lora_id = (data.lora_id or parsed.get("lora_id") or "").strip() or None
+    device_code = normalize_code(data.controller_id) or normalize_code(data.device_code) or normalize_code(parsed.get("device_code"))
+    mac_address = normalize_mac(data.mac_address) or normalize_mac(parsed.get("mac_address"))
+    lora_id = normalize_code(data.lora_id) or normalize_code(parsed.get("lora_id"))
+    hardware_model = normalize_code(data.hardware_model) or normalize_code(parsed.get("hardware_model"))
 
-    device = None
-    if data.device_id is not None:
-        device = db.query(Device).filter(Device.id == data.device_id).first()
-    elif device_code:
-        device = db.query(Device).filter(Device.device_code == device_code).first()
-    elif mac_address:
-        device = db.query(Device).filter(Device.mac_address == mac_address).first()
+    unit = None
+    if data.curing_unit_id is not None:
+        unit = db.query(CuringUnit).filter(CuringUnit.id == data.curing_unit_id, CuringUnit.user_id == user.id).first()
+        if not unit:
+            raise HTTPException(status_code=404, detail="Estufa não encontrada")
 
-    now = datetime.utcnow()
+    device = find_device(db, device_id=data.device_id, code=device_code, mac=mac_address)
+    if data.device_id is not None and device is None:
+        raise HTTPException(status_code=404, detail="Dispositivo não encontrado")
+
     if device:
         if device.user_id not in (None, user.id):
             raise HTTPException(status_code=403, detail="Dispositivo pertence a outro usuário")
@@ -147,102 +63,36 @@ def link_device(
             device.mac_address = mac_address
         if lora_id:
             device.lora_id = lora_id
-        device.status = "online"
-        device.last_seen_at = now
+        if hardware_model:
+            device.hardware_model = hardware_model
     else:
+        if not (device_code or mac_address):
+            raise HTTPException(status_code=422, detail="Informe o ID do controlador ou o endereço MAC")
         device = Device(
             user_id=user.id,
-            device_code=device_code or "ESP32-TOBACCO-01",
+            device_code=device_code,
             mac_address=mac_address,
-            lora_id=lora_id or "0x74C0",
-            hardware_model=data.hardware_model or "Heltec WiFi LoRa 32 V3",
-            firmware_version="v2.1.0",
-            battery_level=100,
-            battery_status="Normal",
-            rssi=-60,
-            snr=9.5,
-            frequency="915.0 MHz",
-            temp_min=35.0,
-            temp_max=75.0,
-            humidity_min=40.0,
-            humidity_max=90.0,
-            status="online",
-            last_seen_at=now,
+            lora_id=lora_id,
+            hardware_model=hardware_model or "Heltec WiFi LoRa 32 V3",
+            created_at=utcnow(),
             sensors_config=json.dumps([
                 {"name": "SHT40 (Temp & Umid)", "type": "SHT40", "status": "Operacional"},
             ]),
         )
         db.add(device)
+        db.flush()
+
+    if unit is not None:
+        unit.device_id = device.id
 
     db.commit()
     db.refresh(device)
-
-    # Link to curing unit if provided
-    if data.curing_unit_id is not None:
-        unit = db.query(CuringUnit).filter(CuringUnit.id == data.curing_unit_id).first()
-        if unit:
-            unit.device_id = device.id
-            db.commit()
-
-    return _serialize_device(device, db)
+    return serialize_device(device, db)
 
 
-@router.post("/telemetry")
+@router.post("/telemetry", response_model=IngestResult, dependencies=[Depends(require_gateway_key)])
 def receive_telemetry(data: TelemetryInput, db: Session = Depends(get_db)):
-    mac = (data.mac_address or "").strip().upper()
-    device = None
-    if mac:
-        device = db.query(Device).filter(Device.mac_address == mac).first()
-    if not device and data.device_code:
-        device = db.query(Device).filter(Device.device_code == data.device_code.strip()).first()
-
-    now = datetime.utcnow()
-    if not device:
-        device = Device(
-            device_code=data.device_code or "ESP32-LoRa",
-            mac_address=mac or "24:6F:28:B1:09:4A",
-            lora_id=data.lora_id or "0x74C0",
-            status="online",
-            last_seen_at=now,
-        )
-        db.add(device)
-        db.commit()
-        db.refresh(device)
-
-    device.last_seen_at = now
-    device.status = "online"
-    if data.battery_level is not None:
-        device.battery_level = data.battery_level
-    if data.rssi is not None:
-        device.rssi = data.rssi
-    if data.snr is not None:
-        device.snr = data.snr
-
-    # If temperature and humidity are sent, store Reading
-    if data.temperature is not None and data.humidity is not None:
-        unit = None
-        if data.curing_unit_id is not None:
-            unit = db.query(CuringUnit).filter(CuringUnit.id == data.curing_unit_id).first()
-        if not unit:
-            unit = db.query(CuringUnit).filter(CuringUnit.device_id == device.id).first()
-        if not unit:
-            unit = db.query(CuringUnit).first()
-            if not unit:
-                unit = CuringUnit(name="Estufa 01", device_id=device.id)
-                db.add(unit)
-                db.commit()
-                db.refresh(unit)
-
-        reading = Reading(
-            temperature=data.temperature,
-            humidity=data.humidity,
-            timestamp=now,
-            curing_unit_id=unit.id,
-        )
-        db.add(reading)
-
-    db.commit()
-    return {"status": "success", "device_id": device.id}
+    return ingest_telemetry(db, data)
 
 
 @router.get("/", response_model=list[DeviceOut])
@@ -250,111 +100,77 @@ def get_devices(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    devices = db.query(Device).filter(Device.user_id == user.id).all()
-    return [_serialize_device(d, db) for d in devices]
+    devices = db.query(Device).filter(Device.user_id == user.id).order_by(Device.id).all()
+    return [serialize_device(device, db) for device in devices]
 
 
-@router.get("/{id}", response_model=DeviceOut)
-def get_device(
-    id: int,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    device = db.query(Device).filter(Device.id == id, Device.user_id == user.id).first()
-    if not device:
-        raise HTTPException(status_code=404, detail="Dispositivo não encontrado")
-    return _serialize_device(device, db)
+@router.get("/{device_id}", response_model=DeviceOut)
+def get_device(db: Session = Depends(get_db), device: Device = Depends(get_owned_device)):
+    return serialize_device(device, db)
 
 
-@router.patch("/{id}", response_model=DeviceOut)
+@router.patch("/{device_id}", response_model=DeviceOut)
 def update_device(
-    id: int,
     data: DeviceUpdate,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    device: Device = Depends(get_owned_device),
 ):
-    device = db.query(Device).filter(Device.id == id, Device.user_id == user.id).first()
-    if not device:
-        raise HTTPException(status_code=404, detail="Dispositivo não encontrado")
+    changes = data.model_dump(exclude_unset=True, exclude_none=True)
+    merged = {name: getattr(device, name) for name in ("temp_min", "temp_max", "humidity_min", "humidity_max")}
+    merged.update({key: value for key, value in changes.items() if key in merged})
+    try:
+        DeviceUpdate(**merged)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
 
-    changes = data.model_dump(exclude_unset=True)
-    for field, val in changes.items():
-        if val is not None:
-            setattr(device, field, val)
-
+    for field, value in changes.items():
+        setattr(device, field, value)
     db.commit()
     db.refresh(device)
-    return _serialize_device(device, db)
+    return serialize_device(device, db)
 
 
-@router.post("/{id}/calibrate", response_model=DeviceOut)
+@router.post("/{device_id}/calibrate", response_model=DeviceOut)
 def calibrate_device_sensors(
-    id: int,
     data: DeviceCalibrationInput,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    device: Device = Depends(get_owned_device),
 ):
-    device = db.query(Device).filter(Device.id == id, Device.user_id == user.id).first()
-    if not device:
-        raise HTTPException(status_code=404, detail="Dispositivo não encontrado")
-
     device.calibration_data = json.dumps(data.model_dump())
     db.commit()
     db.refresh(device)
-    return _serialize_device(device, db)
+    return serialize_device(device, db)
 
 
-@router.post("/{id}/thresholds", response_model=DeviceOut)
+@router.post("/{device_id}/thresholds", response_model=DeviceOut)
 def update_device_thresholds(
-    id: int,
     data: DeviceThresholdsInput,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    device: Device = Depends(get_owned_device),
 ):
-    device = db.query(Device).filter(Device.id == id, Device.user_id == user.id).first()
-    if not device:
-        raise HTTPException(status_code=404, detail="Dispositivo não encontrado")
-
     device.temp_min = data.temp_min
     device.temp_max = data.temp_max
     device.humidity_min = data.humidity_min
     device.humidity_max = data.humidity_max
     db.commit()
     db.refresh(device)
-    return _serialize_device(device, db)
+    return serialize_device(device, db)
 
 
-@router.post("/{id}/reconnect", response_model=DeviceOut)
-def reconnect_device(
-    id: int,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    device = db.query(Device).filter(Device.id == id, Device.user_id == user.id).first()
-    if not device:
-        raise HTTPException(status_code=404, detail="Dispositivo não encontrado")
-
-    device.status = "online"
-    device.last_seen_at = datetime.utcnow()
-    db.commit()
-    db.refresh(device)
-    return _serialize_device(device, db)
+@router.post("/{device_id}/reconnect", response_model=DeviceOut)
+def check_device_connection(db: Session = Depends(get_db), device: Device = Depends(get_owned_device)):
+    # O status vem das leituras recebidas; aqui só é recalculado, nunca forçado para online.
+    return serialize_device(device, db)
 
 
-@router.delete("/{id}")
+@router.delete("/{device_id}")
 def unlink_device(
-    id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    device: Device = Depends(get_owned_device),
 ):
-    device = db.query(Device).filter(Device.id == id, Device.user_id == user.id).first()
-    if not device:
-        raise HTTPException(status_code=404, detail="Dispositivo não encontrado")
-
-    units = db.query(CuringUnit).filter(CuringUnit.device_id == device.id).all()
-    for unit in units:
+    # A estufa e o histórico continuam com o usuário; apenas deixam de receber dados deste dispositivo.
+    for unit in db.query(CuringUnit).filter(CuringUnit.device_id == device.id).all():
         unit.device_id = None
-
-    db.delete(device)
+    device.user_id = None
     db.commit()
     return {"status": "success", "message": "Dispositivo desvinculado com sucesso"}

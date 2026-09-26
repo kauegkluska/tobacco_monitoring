@@ -4,12 +4,17 @@
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 #include <Adafruit_SHT4x.h>
-#include <WiFi.h>
-#include <WiFiManager.h>
-#include <HTTPClient.h>
+
+/* ===============================
+   SENDER - NO DA ESTUFA
+   Le o SHT40, mostra no LCD e transmite via LoRa. Logo apos cada envio escuta
+   o gateway por um instante e aplica nos reles o comando vindo do app/API
+   (ex.: ligar as ventoinhas). O estado real dos reles vai no pacote seguinte.
+   =============================== */
 
 /* ===============================
    CONFIGURATION
+   Os parametros LoRa devem ser IDENTICOS no receiver.
    =============================== */
 
 #define RF_FREQUENCY           915000000
@@ -18,28 +23,49 @@
 #define LORA_SPREADING_FACTOR  7
 #define LORA_CODINGRATE        1
 #define LORA_PREAMBLE_LENGTH   8
+#define LORA_SYMBOL_TIMEOUT    0
 #define LORA_FIX_LENGTH        false
 #define LORA_IQ_INVERSION      false
+
+// Janela de escuta apos cada envio, para receber o comando dos reles (downlink).
+// O receiver responde cerca de 100 ms depois de receber o pacote.
+#define JANELA_RX_MS           1200
+#define TAMANHO_DOWNLINK       64
 
 #define SDA_PIN 4
 #define SCL_PIN 5
 #define INTERVALO_ENVIO 2000
 #define INTERVALO_TELA 3000
-#define CURING_UNIT_ID 1
 
 // Identificador único deste controlador ESP32 (use este ID para vincular no app)
 #define CONTROLLER_ID          "ESP32-TOBACCO-01"
 #define HARDWARE_MODEL         "Heltec WiFi LoRa 32 V3"
-#define LORA_NODE_ID           "0x74C0"
 
-// Use the computer's LAN IP. Never use localhost here.
-const char* API_URL = "http://192.168.1.2:8000/readings/readings/";
+/* ===============================
+   RELES - COMANDADOS PELO APP
+   Rele 1 (GPIO2) = "rele_umidade" da API; rele 2 (GPIO3) = "rele_temperatura".
+   O nome de cada saida (ex.: "Ventoinhas"), o modo e a regra automatica sao
+   configurados no app. Os reles comecam desligados e mantem o ultimo comando
+   recebido se o gateway parar de responder.
+
+   ATENCAO (ESP32-S3 / Heltec V3): GPIO3 e um pino de "strapping" usado na
+   selecao do modo de boot, lido no instante do reset. Normalmente funciona
+   bem como saida apos o boot, mas se notar instabilidade ao ligar a placa
+   com o rele conectado nele, troque para outro GPIO livre (ex: GPIO6).
+   =============================== */
+
+#define RELE_UMIDADE_PIN       2
+#define RELE_TEMPERATURA_PIN   3
+
+// Muitos modulos de rele baratos (ex: SRD-05VDC) sao ativos em NIVEL BAIXO.
+// Se o seu for assim, so trocar as duas linhas abaixo.
+#define RELE_LIGADO    HIGH
+#define RELE_DESLIGADO LOW
 
 /* ===============================
    DEVICES AND STATE
    =============================== */
 
-WiFiManager wifiManager;
 LiquidCrystal_I2C lcd(0x27, 20, 4);
 Adafruit_SHT4x sht40;
 
@@ -49,14 +75,24 @@ bool lora_idle = true;
 static RadioEvents_t RadioEvents;
 unsigned long ultimo_envio = 0;
 unsigned long ultima_troca_tela = 0;
+bool rele_umidade_ligado = false;
+bool rele_temperatura_ligado = false;
+bool comando_recebido = false;          // ja chegou algum comando do gateway?
+volatile bool abrir_janela_rx = false;  // TX terminou: escutar o downlink
+char downlink[TAMANHO_DOWNLINK];
+volatile bool downlink_pendente = false;
 float ultima_temperatura = 0.0;
 float ultima_umidade = 0.0;
 bool mostrar_temperatura = true;
 
 void OnTxDone(void);
 void OnTxTimeout(void);
+void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr);
+void OnRxTimeout(void);
+void OnRxError(void);
+void aplicarReles(bool umidade, bool temperatura);
+void processarDownlink(const char* mensagem);
 bool lerSHT40(float &temperatura, float &umidade);
-bool enviarLeituraAPI(float temperatura, float umidade);
 void atualizarLCD();
 void criarCaracteresGrandes();
 void mostrarTemperatura(float temperatura);
@@ -66,9 +102,9 @@ void mostrarUmidade(float umidade);
    LARGE LCD DIGITS
    =============================== */
 
-byte blocoCheio[8] = { B11111, B11111, B11111, B11111, B11111, B11111, B11111, B11111 };
-byte blocoCima[8] = { B11111, B11111, B11111, B11111, B00000, B00000, B00000, B00000 };
-byte blocoBaixo[8] = { B00000, B00000, B00000, B00000, B11111, B11111, B11111, B11111 };
+byte blocoCheio[8] = { 0b11111, 0b11111, 0b11111, 0b11111, 0b11111, 0b11111, 0b11111, 0b11111 };
+byte blocoCima[8] = { 0b11111, 0b11111, 0b11111, 0b11111, 0b00000, 0b00000, 0b00000, 0b00000 };
+byte blocoBaixo[8] = { 0b00000, 0b00000, 0b00000, 0b00000, 0b11111, 0b11111, 0b11111, 0b11111 };
 
 #define CHE 0
 #define CIM 1
@@ -133,6 +169,15 @@ void mostrarNumeroGrande(int numero)
     desenharDigito(unidades, coluna, 0);
 }
 
+// Colunas 14-19, linhas 1 e 2: estado dos reles (S1/S2 ligado ou "--").
+void mostrarReles()
+{
+    lcd.setCursor(14, 1);
+    lcd.print(rele_umidade_ligado ? "S1:ON " : "S1:-- ");
+    lcd.setCursor(14, 2);
+    lcd.print(rele_temperatura_ligado ? "S2:ON " : "S2:-- ");
+}
+
 void mostrarTemperatura(float temperatura)
 {
     int valor = round((temperatura * 9.0 / 5.0) + 32.0);
@@ -140,6 +185,7 @@ void mostrarTemperatura(float temperatura)
     lcd.setCursor(14, 0);
     lcd.print("TEMP");
     mostrarNumeroGrande(valor);
+    mostrarReles();
     lcd.setCursor(14, 3);
     lcd.print((char)223);
     lcd.print("F");
@@ -151,6 +197,7 @@ void mostrarUmidade(float umidade)
     lcd.setCursor(14, 0);
     lcd.print("UMID");
     mostrarNumeroGrande(round(umidade));
+    mostrarReles();
     lcd.setCursor(14, 3);
     lcd.print("%");
 }
@@ -162,91 +209,52 @@ void atualizarLCD()
 }
 
 /* ===============================
-   WIFI AND API
+   RELES
    =============================== */
 
-void conectarWiFi()
+void aplicarReles(bool umidade, bool temperatura)
 {
-    Serial.println("[WiFi] Conectando...");
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("Conectando WiFi...");
+    const bool mudou = !comando_recebido
+        || umidade != rele_umidade_ligado
+        || temperatura != rele_temperatura_ligado;
 
-    wifiManager.setConnectTimeout(15);
-    wifiManager.setConfigPortalTimeout(180);
+    rele_umidade_ligado = umidade;
+    rele_temperatura_ligado = temperatura;
+    comando_recebido = true;
 
-    if (wifiManager.autoConnect("ESP32-LoRa-Config"))
+    digitalWrite(RELE_UMIDADE_PIN, umidade ? RELE_LIGADO : RELE_DESLIGADO);
+    digitalWrite(RELE_TEMPERATURA_PIN, temperatura ? RELE_LIGADO : RELE_DESLIGADO);
+
+    if (mudou)
     {
-        Serial.print("[WiFi] IP do ESP32: ");
-        Serial.println(WiFi.localIP());
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print("WiFi conectado!");
-        lcd.setCursor(0, 1);
-        lcd.print(WiFi.SSID());
-        lcd.setCursor(0, 2);
-        lcd.print("IP:");
-        lcd.setCursor(0, 3);
-        lcd.print(WiFi.localIP());
-        delay(3000);
-    }
-    else
-    {
-        Serial.println("[WiFi] Nao foi possivel conectar.");
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print("WiFi nao conectado");
-        delay(2000);
+        Serial.print("[RELES] GPIO2 ");
+        Serial.print(umidade ? "LIGADO" : "desligado");
+        Serial.print(" / GPIO3 ");
+        Serial.println(temperatura ? "LIGADO" : "desligado");
+        mostrarReles();
     }
 }
 
-bool enviarLeituraAPI(float temperatura, float umidade)
+// Formato: RELAY;ID=<controller_id>;H=<0|1>;T=<0|1>
+// Comandos para outro CONTROLLER_ID sao ignorados.
+void processarDownlink(const char* mensagem)
 {
-    if (WiFi.status() != WL_CONNECTED)
+    char id[32];
+    int umidade;
+    int temperatura;
+
+    if (sscanf(mensagem, "RELAY;ID=%31[^;];H=%d;T=%d", id, &umidade, &temperatura) == 3)
     {
-        Serial.println("[API] WiFi desconectado");
-        return false;
+        if (strcmp(id, CONTROLLER_ID) != 0) return;
+    }
+    else if (sscanf(mensagem, "RELAY;H=%d;T=%d", &umidade, &temperatura) != 2)
+    {
+        Serial.print("[LoRa] Downlink ignorado: ");
+        Serial.println(mensagem);
+        return;
     }
 
-    HTTPClient http;
-    http.begin(API_URL);
-    http.addHeader("Content-Type", "application/json");
-    http.setTimeout(3000);
-
-    String payload = "{\"temperature\":";
-    payload += String(temperatura, 2);
-    payload += ",\"humidity\":";
-    payload += String(umidade, 2);
-    payload += ",\"curing_unit_id\":";
-    payload += String(CURING_UNIT_ID);
-    payload += ",\"controller_id\":\"";
-    payload += String(CONTROLLER_ID);
-    payload += "\",\"device_code\":\"";
-    payload += String(CONTROLLER_ID);
-    payload += "\",\"lora_id\":\"";
-    payload += String(LORA_NODE_ID);
-    payload += "\",\"mac_address\":\"";
-    payload += WiFi.macAddress();
-    payload += "\",\"battery_level\":98";
-    payload += ",\"rssi\":";
-    payload += String(WiFi.RSSI());
-    payload += "}";
-
-    int status = http.POST(payload);
-    bool success = status >= 200 && status < 300;
-
-    Serial.print("[API] HTTP status: ");
-    Serial.print(status);
-    Serial.print(" -> Controller: ");
-    Serial.println(CONTROLLER_ID);
-    if (!success)
-    {
-        Serial.print("[API] Erro: ");
-        Serial.println(http.errorToString(status));
-    }
-
-    http.end();
-    return success;
+    aplicarReles(umidade != 0, temperatura != 0);
 }
 
 /* ===============================
@@ -280,16 +288,20 @@ void setup()
 
     Serial.println();
     Serial.println("=========================================");
-    Serial.println("  MONITOR DE ESTUFA DE TABACO - ESP32    ");
+    Serial.println("  MONITOR DE ESTUFA - SENDER (LoRa TX)   ");
     Serial.println("=========================================");
     Serial.print("  Controller ID: "); Serial.println(CONTROLLER_ID);
     Serial.print("  Modelo:        "); Serial.println(HARDWARE_MODEL);
-    Serial.print("  LoRa Node ID:  "); Serial.println(LORA_NODE_ID);
     Serial.print("  Frequencia:    "); Serial.print(RF_FREQUENCY / 1000000.0); Serial.println(" MHz");
-    Serial.print("  Destino API:   "); Serial.println(API_URL);
     Serial.println("=========================================");
 
     Mcu.begin(HELTEC_BOARD, SLOW_CLK_TPYE);
+
+    // Comeca com tudo desligado ate o primeiro comando do gateway.
+    pinMode(RELE_UMIDADE_PIN, OUTPUT);
+    pinMode(RELE_TEMPERATURA_PIN, OUTPUT);
+    digitalWrite(RELE_UMIDADE_PIN, RELE_DESLIGADO);
+    digitalWrite(RELE_TEMPERATURA_PIN, RELE_DESLIGADO);
 
     Wire.begin(SDA_PIN, SCL_PIN);
     Wire.setClock(100000);
@@ -320,16 +332,24 @@ void setup()
         lcd.print("SHT40 ERRO");
     }
 
-    conectarWiFi();
-
     RadioEvents.TxDone = OnTxDone;
     RadioEvents.TxTimeout = OnTxTimeout;
+    RadioEvents.RxDone = OnRxDone;
+    RadioEvents.RxTimeout = OnRxTimeout;
+    RadioEvents.RxError = OnRxError;
     Radio.Init(&RadioEvents);
     Radio.SetChannel(RF_FREQUENCY);
     Radio.SetTxConfig(
         MODEM_LORA, TX_OUTPUT_POWER, 0, LORA_BANDWIDTH,
         LORA_SPREADING_FACTOR, LORA_CODINGRATE, LORA_PREAMBLE_LENGTH,
         LORA_FIX_LENGTH, true, 0, 0, LORA_IQ_INVERSION, 3000
+    );
+    // Ultimo parametro false: recepcao com tempo limite (JANELA_RX_MS), nao continua.
+    Radio.SetRxConfig(
+        MODEM_LORA, LORA_BANDWIDTH, LORA_SPREADING_FACTOR,
+        LORA_CODINGRATE, 0, LORA_PREAMBLE_LENGTH,
+        LORA_SYMBOL_TIMEOUT, LORA_FIX_LENGTH,
+        0, true, 0, 0, LORA_IQ_INVERSION, false
     );
 
     ultimo_envio = millis() - INTERVALO_ENVIO;
@@ -344,9 +364,31 @@ void loop()
 {
     Radio.IrqProcess();
 
-    if (WiFi.status() != WL_CONNECTED)
+    // Abre a janela de escuta assim que o envio termina (o gateway responde em ~100 ms).
+    if (abrir_janela_rx)
     {
-        conectarWiFi();
+        abrir_janela_rx = false;
+        Radio.Rx(JANELA_RX_MS);
+    }
+
+    // Protecao: se o radio nao avisar o fim do envio/escuta, volta a transmitir.
+    if (!lora_idle && millis() - ultimo_envio > INTERVALO_ENVIO + JANELA_RX_MS + 3000)
+    {
+        Serial.println("[LoRa] Sem resposta do radio, reiniciando o ciclo");
+        abrir_janela_rx = false;
+        Radio.Sleep();
+        lora_idle = true;
+    }
+
+    if (downlink_pendente)
+    {
+        char mensagem[TAMANHO_DOWNLINK];
+        strcpy(mensagem, downlink);
+        downlink_pendente = false;
+
+        Serial.print("RX downlink: ");
+        Serial.println(mensagem);
+        processarDownlink(mensagem);
     }
 
     if (millis() - ultima_troca_tela >= INTERVALO_TELA)
@@ -370,22 +412,24 @@ void loop()
         ultima_umidade = umidade;
         atualizarLCD();
 
+        // Formato do pacote (o receiver faz o parse):
+        // ID=<id>;N=<contador>;T=<celsius>;H=<umidade>;R1=<0|1>;R2=<0|1>
+        // R1/R2 sao o estado real dos reles, mostrado no app como confirmacao.
         char mensagem[96];
         snprintf(
             mensagem,
             sizeof(mensagem),
-            "ID=%s;N=%ld;T=%.2f;H=%.2f",
+            "ID=%s;N=%ld;T=%.2f;H=%.2f;R1=%d;R2=%d",
             CONTROLLER_ID,
             numero_pacote,
             temperatura,
-            umidade
+            umidade,
+            rele_umidade_ligado ? 1 : 0,
+            rele_temperatura_ligado ? 1 : 0
         );
 
         Serial.print("TX LoRa: ");
         Serial.println(mensagem);
-
-        // Sends the reading with controller_id directly to FastAPI over Wi-Fi
-        enviarLeituraAPI(temperatura, umidade);
 
         lora_idle = false;
         Radio.Send((uint8_t*)mensagem, strlen(mensagem));
@@ -395,13 +439,39 @@ void loop()
 
 void OnTxDone(void)
 {
-    Serial.println("[LoRa] TX concluido");
-    lora_idle = true;
+    // Continua ocupado ate a janela de escuta do downlink terminar.
+    abrir_janela_rx = true;
 }
 
 void OnTxTimeout(void)
 {
     Serial.println("[LoRa] TX TIMEOUT");
+    Radio.Sleep();
+    lora_idle = true;
+}
+
+void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
+{
+    Radio.Sleep();
+
+    if (size >= TAMANHO_DOWNLINK) size = TAMANHO_DOWNLINK - 1;
+    memcpy(downlink, payload, size);
+    downlink[size] = '\0';
+    downlink_pendente = true;
+
+    lora_idle = true;
+}
+
+void OnRxTimeout(void)
+{
+    // Nenhum comando nesta rodada: os reles mantem o ultimo estado.
+    Radio.Sleep();
+    lora_idle = true;
+}
+
+void OnRxError(void)
+{
+    Serial.println("[LoRa] Erro ao receber o downlink (CRC)");
     Radio.Sleep();
     lora_idle = true;
 }
