@@ -115,7 +115,7 @@ export function renderAuth({ onAuthenticated }) {
       },
       error,
       field({ label: "Seu nome", input: name }),
-      field({ label: "Login", input: login, hint: "Pelo menos 3 caracteres. Você vai usar para entrar." }),
+      field({ label: "Login", input: login, hint: "Mínimo de 3 caracteres." }),
       field({ label: "Senha", input: password, hint: "Pelo menos 6 caracteres." }),
       submit,
     );
@@ -149,9 +149,9 @@ export function renderAuth({ onAuthenticated }) {
               submit.querySelector("span:last-child").textContent = "Salvar nova senha";
               if (result.reset_token) {
                 code.value = result.reset_token;
-                info.textContent = "Código gerado e preenchido abaixo (modo de desenvolvimento). Ele vale por 15 minutos.";
+                info.textContent = "Código preenchido abaixo (modo de desenvolvimento). Vale por 15 min.";
               } else {
-                info.textContent = "Se o login existir, o código foi enviado ao responsável pelo sistema. Ele vale por 15 minutos.";
+                info.textContent = "Se o login existir, o código foi enviado ao responsável pelo sistema. Vale por 15 min.";
               }
               info.hidden = false;
               password.focus();
@@ -187,7 +187,7 @@ export function renderAuth({ onAuthenticated }) {
 
   function openServerDialog() {
     const input = h("input", { class: "input num", value: api.base, inputmode: "url", placeholder: "http://192.168.1.2:8000" });
-    const status = h("p", { class: "field-hint" }, "Use o endereço do computador onde o backend está rodando.");
+    const status = h("p", { class: "field-hint" }, "Endereço do computador que roda o servidor.");
     openModal({
       title: "Endereço do servidor",
       body: h("div", { class: "form" }, field({ label: "URL da API", input }), status),
@@ -210,7 +210,7 @@ export function renderAuth({ onAuthenticated }) {
   }
 
   function render() {
-    const titles = { login: "Entrar na plataforma", register: "Criar conta de produtor", forgot: "Recuperar senha" };
+    const titles = { login: "Entrar", register: "Criar conta", forgot: "Recuperar senha" };
     const form = mode === "login" ? loginForm() : mode === "register" ? registerForm() : forgotForm();
     clear(card, brand(titles[mode]), mode === "forgot" ? null : tabs(), form, serverFooter());
     card.querySelector("input")?.focus();

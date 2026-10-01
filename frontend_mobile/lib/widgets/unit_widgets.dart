@@ -60,6 +60,7 @@ class ReadingTile extends StatelessWidget {
     required this.unit,
     this.stale = false,
     this.compact = false,
+    this.target,
     super.key,
   });
 
@@ -75,6 +76,9 @@ class ReadingTile extends StatelessWidget {
 
   /// Versão da lista de estufas: sem régua e com números menores.
   final bool compact;
+
+  /// Temperatura alvo da ventoinha em °C, mostrada abaixo do valor.
+  final double? target;
 
   @override
   Widget build(BuildContext context) {
@@ -145,6 +149,11 @@ class ReadingTile extends StatelessWidget {
               const SizedBox(height: 6),
             ] else
               const SizedBox(height: 2),
+            if (target != null)
+              Text(
+                'Alvo ${f.temp(target, unit)}',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: context.scheme.primary),
+              ),
             Text(
               expected == null ? 'Sem fase em andamento' : 'Esperado $expected',
               style: TextStyle(fontSize: 12.5, color: outside && !stale ? context.colors.crit : context.colors.muted),

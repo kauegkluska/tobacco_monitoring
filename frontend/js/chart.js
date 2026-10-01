@@ -1,4 +1,4 @@
-// Gráfico de linha em SVG: uma série, faixa segura (limites), fases da cura, cursor com tooltip e teclado.
+// Gráfico de linha em SVG: uma série, faixa esperada (limites), fases da cura, cursor com tooltip e teclado.
 
 import { h } from "./dom.js";
 
@@ -62,7 +62,7 @@ export function phaseLegend(phases, describe) {
  * @param {(p: object) => string} [options.detail]  linha extra no tooltip
  * @param {number} [options.gapMs]  intervalo sem dados a partir do qual a linha é interrompida
  * @param {{start: Date, end: Date, key: string|null, name: string, min?: number, max?: number}[]} [options.phases]
- *   fases da cura no período: fundo colorido e, com min/max, a faixa segura de cada uma
+ *   fases da cura no período: fundo colorido e, com min/max, a faixa esperada de cada uma
  */
 export function lineChart({ points, limits = null, domain = null, format, detail, gapMs = 10 * MINUTE, height = 260, label, emptyText, phases = [] }) {
   const container = h("div", { class: "chart" });
@@ -140,7 +140,7 @@ export function lineChart({ points, limits = null, domain = null, format, detail
     }
     root.append(grid);
 
-    // Fases da cura: fundo e barra no topo com a cor da fase, faixa segura de cada uma
+    // Fases da cura: fundo e barra no topo com a cor da fase, faixa esperada de cada uma
     const clampX = (time) => Math.min(margin.left + plotWidth, Math.max(margin.left, x(time)));
     for (const phase of phases) {
       const x1 = clampX(phase.start.getTime());
@@ -172,7 +172,7 @@ export function lineChart({ points, limits = null, domain = null, format, detail
       root.append(group);
     }
 
-    // Faixa segura entre os limites
+    // Faixa esperada entre os limites
     const hasMin = limits?.min !== undefined && limits?.min !== null;
     const hasMax = limits?.max !== undefined && limits?.max !== null;
     if (hasMin || hasMax) {

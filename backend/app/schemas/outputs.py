@@ -6,7 +6,8 @@ from schemas.common import UTCDateTime
 
 OutputMode = Literal["auto", "on", "off"]
 OutputTrigger = Literal[
-    "humidity_out", "humidity_high", "humidity_low", "temperature_out", "temperature_high", "temperature_low",
+    "humidity_out", "humidity_high", "humidity_low",
+    "temperature_out", "temperature_high", "temperature_low", "temperature_target",
 ]
 
 
@@ -48,6 +49,8 @@ class OutputsOut(BaseModel):
     curing_unit_id: int
     is_drying: bool
     confirmed_at: UTCDateTime | None = None
+    # Temperatura alvo em °C (regra "temperature_target"); nula até o produtor definir.
+    target_temperature: float | None = None
     humidity: OutputState
     temperature: OutputState
     last_buzzer: OutputEventOut | None = None
@@ -61,6 +64,7 @@ class OutputsUpdate(BaseModel):
     temperature_name: str | None = Field(None, min_length=1, max_length=40)
     humidity_trigger: OutputTrigger | None = None
     temperature_trigger: OutputTrigger | None = None
+    target_temperature: float | None = Field(None, ge=20, le=90)
 
     @field_validator("humidity_name", "temperature_name")
     @classmethod

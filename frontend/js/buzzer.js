@@ -44,17 +44,18 @@ export function playBeep() {
 
 /** Regras do modo automático das saídas (mesmos códigos da API). */
 export const OUTPUT_TRIGGERS = [
-  { value: "humidity_out", label: "Umidade fora da faixa segura" },
+  { value: "humidity_out", label: "Umidade fora da faixa esperada" },
   { value: "humidity_high", label: "Umidade acima do máximo" },
   { value: "humidity_low", label: "Umidade abaixo do mínimo" },
-  { value: "temperature_out", label: "Temperatura fora da faixa segura" },
+  { value: "temperature_out", label: "Temperatura fora da faixa esperada" },
   { value: "temperature_high", label: "Temperatura acima do máximo" },
   { value: "temperature_low", label: "Temperatura abaixo do mínimo" },
+  { value: "temperature_target", label: "Temperatura abaixo do alvo" },
 ];
 
 /** Ex.: "Ventoinhas ligou (automático, 46,0 °C)". */
 export function describeOutputEvent(event) {
-  const name = event.output_name || (event.output === "temperature" ? "Saída de temperatura" : "Saída de umidade");
+  const name = event.output_name || (event.output === "temperature" ? "Ventoinha" : "Flap");
   const action = event.turned_on ? "ligou" : "desligou";
   const value =
     event.value === null || event.value === undefined

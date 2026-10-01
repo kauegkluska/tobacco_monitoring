@@ -1,3 +1,4 @@
 {
-    "java.configuration.updateBuildConfiguration": "interactive"
+    "java.configuration.updateBuildConfiguration": "interactive",
+    "cmake.sourceDirectory": "C:/Users/Kauê Kluska/Documents/Aplicativo/tobacco_monitoring/frontend_mobile/windows"
 }

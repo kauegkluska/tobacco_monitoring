@@ -57,12 +57,13 @@ flowchart LR
 ## Funcionalidades
 
 ### Monitoramento
-- Temperatura (°F ou °C) e umidade relativa em tempo real, com a faixa segura destacada.
-- Situação da estufa em uma frase: tudo certo, alerta, sensor sem sinal ou secagem parada.
-- Gráficos de 1 hora a 30 dias, com mínima, média e máxima, e exportação para planilha (CSV).
+- Temperatura (°F ou °C) e umidade relativa em tempo real, com a faixa esperada da fase destacada.
+- Situação de cada estufa em uma palavra: Normal, Fora da faixa, Atenção, Crítico, Sem sinal ou Parada.
+- Gráficos de 6 horas a 30 dias, com mínima, média e máxima, e exportação para planilha (CSV).
 - Cura em quatro fases (Amarelação, Murchamento, Secagem da folha e Secagem do talo), cada uma com a própria faixa de temperatura e umidade. O app mostra o que falta para avançar e o produtor confirma olhando as folhas.
-- Histórico colorido por fase: o fundo do gráfico e a faixa segura mudam a cada fase.
+- Histórico colorido por fase: o fundo do gráfico e a faixa esperada mudam a cada fase.
 - Duração prevista, progresso e término estimado.
+- Secagem parada no meio da cura: ao ligar de novo, o produtor escolhe **continuar** a mesma estufada ou começar uma **nova estufada**. O tempo parado não conta nas horas da fase nem no término previsto.
 - Sinal LoRa (RSSI/SNR) e estado online/offline de cada sensor.
 
 ### Alertas
@@ -74,9 +75,10 @@ flowchart LR
 - Fechamento automático quando o valor volta para a faixa, com margem para não ficar abrindo e fechando. Reconhecer e resolver pelo app.
 
 ### Controle das saídas (relés)
-- Dois relés no sender (GPIO2 e GPIO3), com **nome editável**, por exemplo "Ventoinhas".
+- Dois relés no sender: **Flap** (relé 1, GPIO2) e **Ventoinha** (relé 2, GPIO3), com nome editável.
 - Modos **Automático**, **Ligada** e **Desligada**.
-- Regra do automático à escolha: temperatura ou umidade fora da faixa, acima do máximo ou abaixo do mínimo.
+- **Temperatura alvo**: o produtor define o alvo (em °F) e, no automático, a ventoinha liga abaixo dele e desliga ao atingi-lo (margem de 0,9 °F para o relé não ficar batendo). Sem alvo definido, a ventoinha fica desligada.
+- Outras regras do automático à escolha: temperatura ou umidade fora da faixa, acima do máximo ou abaixo do mínimo.
 - **Confirmação do sender**: o app mostra quando o relé realmente mudou de estado.
 - Aviso sonoro de 2 s no gateway sempre que uma saída liga, repetido no celular (som e vibração).
 - Histórico de acionamentos.
@@ -221,8 +223,8 @@ Ligações do sender:
 | Componente | Pino |
 |---|---|
 | SHT40 e LCD (I²C) | SDA GPIO4, SCL GPIO5 |
-| Relé 1 (umidade / ventoinhas) | GPIO2 |
-| Relé 2 (temperatura / queimador) | GPIO3 |
+| Relé 1 (flap) | GPIO2 |
+| Relé 2 (ventoinha) | GPIO3 |
 | Buzzer (no receiver) | GPIO5 |
 
 ### 3. Painel web
@@ -259,9 +261,9 @@ flutter build web --release --base-href /mobile/
 
 1. Crie uma conta na tela de login.
 2. Em **Estufas**, cadastre a estufa e vincule o sensor pelo QR code ou pelo ID (ex.: `ESP32-TOBACCO-01`).
-3. No **Início**, toque em **Iniciar secagem**. A cura começa na Amarelação, as leituras passam a ser gravadas e os alertas passam a funcionar. Use **Avançar para…** no card Secagem quando as folhas estiverem prontas para a próxima fase.
-4. Em **Saídas e aviso sonoro**, toque no lápis para dar nome aos relés e escolher a regra do automático.
-5. Em **Perfil**, ative **Avisar mesmo com o app fechado** para receber notificações.
+3. Abra a estufa e toque em **Iniciar secagem**. A cura começa na Amarelação, as leituras passam a ser gravadas e os alertas passam a funcionar. Use **Avançar fase** no card Cura quando as folhas estiverem prontas.
+4. Em **Saídas**, defina a **temperatura alvo** da ventoinha. O lápis muda o nome e a regra de cada relé.
+5. Em **Ajustes**, ative **Avisar com o app fechado** para receber notificações.
 
 ## Configuração
 

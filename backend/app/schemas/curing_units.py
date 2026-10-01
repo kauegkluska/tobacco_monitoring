@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field, field_validator
 
 from schemas.common import UTCDateTime
+from schemas.readings import ReadingOut
 from services.phases import NOT_STARTED, STAGES
 
 
@@ -30,6 +31,8 @@ class CuringUnitUpdate(BaseModel):
 class PhaseCheck(BaseModel):
     label: str
     ok: bool
+    metric: str | None = None
+    target: float | None = None
 
 
 class PhaseStatus(BaseModel):
@@ -60,13 +63,25 @@ class CuringUnitOut(BaseModel):
     device_id: int | None
     stage_started_at: UTCDateTime
     drying_started_at: UTCDateTime | None
+    cycle_started_at: UTCDateTime | None = None
+    # Horas com a secagem ligada, sem o tempo parado: na fase atual e na estufada inteira.
+    stage_hours: float | None = None
+    cycle_hours: float | None = None
+    # Secagem parada no meio de uma fase: ao ligar, o produtor escolhe continuar ou começar outra estufada.
+    interrupted: bool = False
+    paused_at: UTCDateTime | None = None
     estimated_duration_hours: float | None
     estimated_completion_at: UTCDateTime | None = None
     is_drying: bool = False
+    target_temperature: float | None = None
     device_code: str | None = None
     device_status: str | None = None
     # Presente com a secagem em andamento.
     phase: PhaseStatus | None = None
+    # Só na listagem: última leitura gravada e alertas ativos (total e críticos ou piores).
+    latest: ReadingOut | None = None
+    active_alerts: int = 0
+    critical_alerts: int = 0
 
     model_config = {"from_attributes": True}
 

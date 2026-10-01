@@ -17,17 +17,21 @@ RELAYS = {"humidity": (1, "GPIO2"), "temperature": (2, "GPIO3")}
 
 # Regra do modo automático: grandeza medida, quando a saída liga e os textos exibidos no app.
 TRIGGERS = {
-    "humidity_out": ("humidity", "out", "a umidade sair da faixa segura", "a umidade saiu da faixa segura"),
+    "humidity_out": ("humidity", "out", "a umidade sair da faixa esperada", "a umidade saiu da faixa esperada"),
     "humidity_high": ("humidity", "high", "a umidade passar do máximo", "a umidade passou do máximo"),
     "humidity_low": ("humidity", "low", "a umidade ficar abaixo do mínimo", "a umidade ficou abaixo do mínimo"),
-    "temperature_out": ("temperature", "out", "a temperatura sair da faixa segura", "a temperatura saiu da faixa segura"),
+    "temperature_out": ("temperature", "out", "a temperatura sair da faixa esperada", "a temperatura saiu da faixa esperada"),
     "temperature_high": ("temperature", "high", "a temperatura passar do máximo", "a temperatura passou do máximo"),
     "temperature_low": (
         "temperature", "low", "a temperatura ficar abaixo do mínimo", "a temperatura ficou abaixo do mínimo",
     ),
+    # Ventoinha: liga abaixo da temperatura alvo definida pelo produtor e desliga ao atingi-la.
+    "temperature_target": (
+        "temperature", "target", "a temperatura ficar abaixo do alvo", "a temperatura está abaixo do alvo",
+    ),
 }
-DEFAULT_TRIGGERS = {"humidity": "humidity_out", "temperature": "temperature_out"}
-DEFAULT_NAMES = {"humidity": "Saída de umidade", "temperature": "Saída de temperatura"}
+DEFAULT_TRIGGERS = {"humidity": "humidity_out", "temperature": "temperature_target"}
+DEFAULT_NAMES = {"humidity": "Flap", "temperature": "Ventoinha"}
 
 
 def _get(unit: CuringUnit, output: str, field: str):
@@ -44,9 +48,16 @@ def name_of(unit: CuringUnit, output: str) -> str:
 
 
 def _auto_state(current: bool, value: float | None, low: float, high: float, margin: float, direction: str) -> bool:
-    """Liga ao violar o limite e só desliga com folga dentro da faixa, para o relé não ficar batendo."""
+    """Liga ao violar o limite e só desliga com folga dentro da faixa, para o relé não ficar batendo.
+
+    Na regra "target", `low` é a temperatura alvo: liga abaixo de alvo − margem e desliga ao atingir o alvo.
+    """
     if value is None:
         return current
+    if direction == "target":
+        if value < low - margin:
+            return True
+        return False if value >= low else current
     too_high = value > high
     too_low = value < low
     if direction == "high":
@@ -72,7 +83,7 @@ def update_outputs(
 ) -> None:
     """Atualiza o comando das saídas e registra cada mudança (ligar dispara o aviso sonoro do gateway).
 
-    No automático, a faixa segura é a da fase da cura em andamento.
+    No automático, a faixa esperada é a da fase da cura em andamento.
     """
     limits = limits_for(unit)
     now = utcnow()
@@ -89,6 +100,13 @@ def update_outputs(
             new_state, cause = False, "manual"
         elif limits is None:
             new_state, cause = False, "stopped"
+        elif direction == "target":
+            # Sem temperatura alvo definida, a ventoinha fica desligada.
+            target = unit.target_temperature
+            new_state = False if target is None else _auto_state(
+                current, value, target, target, TEMPERATURE_HYSTERESIS_C, direction,
+            )
+            cause = "auto"
         else:
             if metric == "humidity":
                 low, high, margin = limits["humidity_min"], limits["humidity_max"], HUMIDITY_HYSTERESIS
@@ -150,14 +168,16 @@ def _reason(unit: CuringUnit, output: str) -> str:
     on = bool(_get(unit, output, "on"))
     _, _, when, because = TRIGGERS[trigger_of(unit, output)]
     if mode == "on":
-        return "Ligada manualmente no app."
+        return "Ligada pelo app."
     if mode == "off":
-        return "Desligada manualmente no app."
+        return "Desligada pelo app."
     if unit.drying_started_at is None:
-        return "Automático: fica desligada enquanto a secagem estiver parada."
+        return "Desligada: secagem parada."
+    if trigger_of(unit, output) == "temperature_target" and unit.target_temperature is None:
+        return "Desligada: defina a temperatura alvo."
     if on:
-        return f"Automático: ligada porque {because}."
-    return f"Automático: liga quando {when}."
+        return f"Ligada: {because}."
+    return f"Liga quando {when}."
 
 
 def _confirmation(unit: CuringUnit, output: str) -> dict:
@@ -189,6 +209,7 @@ def describe(db: Session, unit: CuringUnit, events: int = 10) -> dict:
         "curing_unit_id": unit.id,
         "is_drying": unit.drying_started_at is not None,
         "confirmed_at": unit.outputs_confirmed_at,
+        "target_temperature": unit.target_temperature,
         **{
             output: {
                 "name": name_of(unit, output),

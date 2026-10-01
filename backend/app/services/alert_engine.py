@@ -42,10 +42,6 @@ HEATING_CLEAR_RATE = 1.1
 COVERAGE_SLACK = timedelta(minutes=1)
 
 
-def _fahrenheit(celsius: float) -> float:
-    return celsius * 9 / 5 + 32
-
-
 def _br(value: float) -> str:
     """Uma casa decimal com vírgula, como no restante da interface."""
     return f"{value:.1f}".replace(".", ",")
@@ -78,14 +74,11 @@ def _sustained(db: Session, unit: CuringUnit, rule: Rule, tier: Tier, now: datet
     return bool(total) and not inside_count and first <= start + COVERAGE_SLACK
 
 
-def _describe(rule: Rule, value: float, threshold: float) -> str:
-    side = "acima de" if rule.direction == "high" else "abaixo de"
-    if rule.metric == "temperature":
-        return (
-            f"Temperatura de {_br(_fahrenheit(value))} °F ({_br(value)} °C) {side} "
-            f"{_br(_fahrenheit(threshold))} °F ({_br(threshold)} °C)"
-        )
-    return f"Umidade de {_br(value)}% {side} {_br(threshold)}%"
+def _describe(rule: Rule) -> str:
+    # O valor e o limite vão nos campos "value" e "threshold"; o app mostra na unidade escolhida.
+    metric = "Temperatura" if rule.metric == "temperature" else "Umidade"
+    side = "acima" if rule.direction == "high" else "abaixo"
+    return f"{metric} {side} do limite"
 
 
 def _active(db: Session, unit: CuringUnit, alert_type: str) -> Alert | None:
@@ -138,7 +131,7 @@ def _evaluate_rule(db: Session, unit: CuringUnit, phase: Phase, rule: Rule, valu
 
     if worst is not None:
         duration = f" por {worst.sustain_minutes} min" if worst.sustain_minutes else ""
-        message = f"{_describe(rule, value, worst.threshold)} na fase de {phase.name}{duration}."
+        message = f"{_describe(rule)} na fase de {phase.name}{duration}."
         _raise(db, unit, rule.type, worst.severity, message, now, value, worst.threshold)
         return
 
@@ -178,8 +171,9 @@ def _evaluate_heating(db: Session, unit: CuringUnit, phase: Phase, now: datetime
         return
     if rate > phase.heating_limit:
         message = (
-            f"Aquecimento de {_br(rate)} °C por hora na fase de {phase.name}. "
-            f"Suba no máximo {_br(phase.heating_limit)} °C por hora para a umidade acompanhar."
+            # Variação por hora: em °F é 1,8 vez a variação em °C.
+            f"Subindo {_br(rate * 1.8)} °F/h na fase de {phase.name}. "
+            f"Máximo: {_br(phase.heating_limit * 1.8)} °F/h."
         )
         _raise(db, unit, HEATING_TYPE, "warning", message, now)
     elif rate <= HEATING_CLEAR_RATE:
@@ -193,7 +187,9 @@ def _evaluate_below_range(db: Session, unit: CuringUnit, phase: Phase, value: fl
         "low",
         (Tier(phase.temp_min - BELOW_RANGE_MARGIN_C, "warning", BELOW_RANGE_SUSTAIN_MINUTES),),
     )
-    warming_up = now - unit.stage_started_at < timedelta(hours=phase.warmup_hours)
+    # O aquecimento conta desde a entrada na fase ou desde a retomada da secagem, o que for mais recente.
+    warming_from = max(unit.stage_started_at, unit.drying_started_at or unit.stage_started_at)
+    warming_up = now - warming_from < timedelta(hours=phase.warmup_hours)
     if warming_up:
         # A estufa ainda está chegando na faixa da fase.
         _close(_active(db, unit, BELOW_RANGE_TYPE), now)
@@ -234,13 +230,10 @@ def check_missing_readings(db: Session, now: datetime | None = None) -> None:
         silent = (now - (last or unit.drying_started_at)).total_seconds()
         minutes = max(1, round(silent / 60))
         if silent >= critical_after:
-            message = (
-                f"Estufa sem novas leituras há {minutes} min. O sensor ou o gateway perdeu a comunicação: "
-                "confira o sender, o receiver e o Wi-Fi."
-            )
+            message = f"Sem leituras há {minutes} min. Confira o sensor, o gateway e o Wi-Fi."
             _raise(db, unit, NO_READINGS_TYPE, "critical", message, now)
         elif silent >= warning_after:
-            message = f"Sensor sem resposta há {minutes} min. Confira se o sender e o gateway estão ligados."
+            message = f"Sem leituras há {minutes} min. Confira se o sensor e o gateway estão ligados."
             _raise(db, unit, NO_READINGS_TYPE, "warning", message, now)
         else:
             _close(_active(db, unit, NO_READINGS_TYPE), now)

@@ -1,23 +1,24 @@
-// Inicialização: sessão, estrutura da página e navegação por hash (#/inicio, #/historico...).
+// Inicialização: sessão, estrutura da página e navegação por hash (#/estufas, #/estufa/3...).
 
 import { startBuzzerWatch, stopBuzzerWatch } from "./buzzer.js";
 import { api } from "./api.js";
 import { clear, h, icon, toast } from "./dom.js";
 import { renderAlerts } from "./pages/alerts.js";
 import { renderAuth } from "./pages/auth.js";
-import { renderDashboard } from "./pages/dashboard.js";
-import { renderHistory } from "./pages/history.js";
-import { renderProfile } from "./pages/profile.js";
+import { renderSettings } from "./pages/settings.js";
+import { renderUnit } from "./pages/unit.js";
 import { renderUnits } from "./pages/units.js";
-import { applyTheme, prefs } from "./store.js";
+import { applyTheme } from "./store.js";
 
 const ROUTES = [
-  { path: "inicio", label: "Início", title: "Visão geral", icon: "dashboard", render: renderDashboard },
-  { path: "historico", label: "Histórico", title: "Histórico de leituras", icon: "chart", render: renderHistory },
-  { path: "alertas", label: "Alertas", title: "Central de alertas", icon: "bell", render: renderAlerts },
-  { path: "estufas", label: "Estufas", title: "Estufas e dispositivos", icon: "warehouse", render: renderUnits },
-  { path: "perfil", label: "Perfil", title: "Perfil e ajustes", icon: "person", render: renderProfile },
+  { path: "estufas", label: "Estufas", icon: "warehouse", render: renderUnits },
+  { path: "alertas", label: "Alertas", icon: "bell", render: renderAlerts },
+  { path: "ajustes", label: "Ajustes", icon: "tune", render: renderSettings },
 ];
+// A tela de uma estufa (#/estufa/3) fica sob a aba Estufas.
+const UNIT_ROUTE = { path: "estufa", label: "Estufa", nav: "estufas", render: renderUnit };
+// Endereços das versões anteriores do painel.
+const OLD_PATHS = { inicio: "estufas", historico: "estufas", perfil: "ajustes" };
 const BADGE_POLL_MS = 30_000;
 
 const app = document.getElementById("app");
@@ -28,7 +29,9 @@ let badgeTimer = null;
 
 function parseHash() {
   const [path, queryString = ""] = window.location.hash.replace(/^#\/?/, "").split("?");
-  return { route: ROUTES.find((route) => route.path === path) || null, query: new URLSearchParams(queryString) };
+  const [name, param] = path.split("/");
+  const route = name === UNIT_ROUTE.path && /^\d+$/.test(param || "") ? UNIT_ROUTE : ROUTES.find((item) => item.path === name) || null;
+  return { route, name, param, query: new URLSearchParams(queryString) };
 }
 
 function navigate(hash) {
@@ -79,12 +82,12 @@ function buildShell() {
   const brand = (subtitle) =>
     h(
       "a",
-      { class: "brand", href: "#/inicio" },
+      { class: "brand", href: "#/estufas" },
       h("span", { class: "brand-mark" }, icon("eco")),
       h("span", { class: "brand-text" }, h("span", { class: "brand-eyebrow" }, "Monitor de Estufa"), h("span", { class: "brand-title" }, subtitle)),
     );
 
-  const connection = h("span", { class: "connection", role: "status" }, h("span", { class: "dot", "aria-hidden": "true" }), h("span", { class: "connection-label" }, "Servidor conectado"));
+  const connection = h("span", { class: "connection", role: "status" }, h("span", { class: "dot", "aria-hidden": "true" }), h("span", { class: "connection-label" }, "Conectado"));
   const userName = h("span", {}, user?.name || "");
 
   const view = h("main", { id: "view", class: "view", tabindex: -1 });
@@ -96,7 +99,7 @@ function buildShell() {
       { class: "sidebar", "aria-label": "Menu principal" },
       brand("Cura de tabaco"),
       h("nav", { class: "side-nav" }, ROUTES.map((route) => navLink(route, false))),
-      h("div", { class: "sidebar-footer" }, h("p", { style: { fontWeight: 600 } }, userName), h("p", { class: "small muted" }, "Leituras atualizadas automaticamente.")),
+      h("div", { class: "sidebar-footer" }, h("p", { style: { fontWeight: 600 } }, userName)),
     ),
     h(
       "div",
@@ -113,36 +116,40 @@ function buildShell() {
 function updateConnection(online) {
   if (!shell) return;
   shell.connection.classList.toggle("is-down", !online);
-  shell.connection.querySelector(".connection-label").textContent = online ? "Servidor conectado" : "Sem conexão com o servidor";
+  shell.connection.querySelector(".connection-label").textContent = online ? "Conectado" : "Sem conexão";
   shell.connection.setAttribute("aria-label", online ? "Servidor conectado" : "Sem conexão com o servidor");
 }
 
 function renderRoute() {
-  const { route, query } = parseHash();
+  const { route, name, param, query } = parseHash();
   if (!route) {
-    window.location.replace("#/inicio");
+    window.location.replace(`#/${OLD_PATHS[name] || "estufas"}`);
     return;
   }
   current?.destroy?.();
   const ctx = {
     query,
+    param,
     navigate,
     setAlertCount,
-    selectUnit: (unitId) => prefs.set({ unitId }),
+    setTitle: (title) => {
+      shell.mobileTitle.textContent = title;
+      document.title = `${title} · Monitor de Estufa`;
+    },
     setUser: (updated) => {
       user = updated;
       if (shell) shell.userName.textContent = updated.name;
     },
     logout,
   };
+  ctx.setTitle(route.label);
   current = route.render(ctx);
   clear(shell.view, current.el);
+  const active = route.nav || route.path;
   shell.links.forEach((link) => {
-    if (link.dataset.route === route.path) link.setAttribute("aria-current", "page");
+    if (link.dataset.route === active) link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
   });
-  shell.mobileTitle.textContent = route.title;
-  document.title = `${route.label} · Monitor de Estufa`;
   window.scrollTo({ top: 0 });
 }
 
@@ -178,7 +185,7 @@ async function start() {
   }
   try {
     user = await api.get("/users/me");
-    if (!window.location.hash) window.location.replace("#/inicio");
+    if (!window.location.hash) window.location.replace("#/estufas");
     showApp();
   } catch (error) {
     if (error.status === 401) showLogin();

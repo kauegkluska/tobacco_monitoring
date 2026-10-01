@@ -161,7 +161,35 @@ class _UnitPageState extends State<UnitPage> {
   // ---------------------------------------------------------------------------
   // Cura
 
-  Future<void> _startDrying() => _run(() => api.post('$_base/start-drying'), 'Secagem iniciada.', withSeries: true);
+  Future<void> _startDrying(CuringUnit current) async {
+    var newBatch = false;
+    if (current.interrupted) {
+      final choice = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Continuar a secagem?'),
+          content: Text(
+            'A secagem parou em ${current.stage} com ${f.duration(current.stageHours)} nesta fase'
+            '${current.pausedAt == null ? '' : ', ${f.relative(current.pausedAt)}'}.\n\n'
+            'Continuar: segue na mesma fase, sem contar o tempo parado.\n'
+            'Nova estufada: começa outra carga na Amarelação, do zero.',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancelar')),
+            OutlinedButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Nova estufada')),
+            FilledButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Continuar')),
+          ],
+        ),
+      );
+      if (choice == null) return;
+      newBatch = choice;
+    }
+    await _run(
+      () => api.post('$_base/start-drying${newBatch ? '?new_batch=true' : ''}'),
+      newBatch ? 'Nova estufada iniciada.' : (current.interrupted ? 'Secagem retomada.' : 'Secagem iniciada.'),
+      withSeries: true,
+    );
+  }
 
   Future<void> _stopDrying() async {
     final confirmed = await confirmAction(
@@ -366,6 +394,62 @@ class _UnitPageState extends State<UnitPage> {
     name.dispose();
   }
 
+  /// Temperatura alvo da ventoinha, digitada na unidade escolhida e enviada em °C.
+  Future<void> _editTarget() async {
+    final unitPref = prefs.unit;
+    final symbol = f.unitSymbol(unitPref);
+    final current = outputs?.targetTemperature;
+    final controller = TextEditingController(text: current == null ? '' : f.number(f.tempValue(current, unitPref), 0));
+    final phase = unit?.phase;
+    String? sheetError;
+    await showFormSheet<void>(
+      context,
+      title: 'Temperatura alvo',
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, setSheetState) => Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            FormErrorText(sheetError),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: InputDecoration(
+                labelText: 'Alvo',
+                suffixText: symbol,
+                helperText: phase == null
+                    ? 'A ventoinha liga abaixo do alvo e desliga ao atingi-lo.'
+                    : 'Faixa da fase: ${f.tempRange(phase.limits.tempMin, phase.limits.tempMax, unitPref)}',
+              ),
+            ),
+            const SizedBox(height: 20),
+            BusyButton(
+              label: 'Salvar',
+              onPressed: () async {
+                final typed = double.tryParse(controller.text.trim().replaceAll(',', '.'));
+                final celsius = typed == null ? null : f.tempToCelsius(typed, unitPref);
+                if (celsius == null || celsius < 20 || celsius > 90) {
+                  setSheetState(() => sheetError = 'Informe um valor entre ${f.tempRange(20, 90, unitPref)}.');
+                  return;
+                }
+                try {
+                  final result = await api.patch('$_base/outputs', {'target_temperature': double.parse(celsius.toStringAsFixed(2))});
+                  if (sheetContext.mounted) Navigator.pop(sheetContext);
+                  if (!mounted) return;
+                  setState(() => outputs = Outputs.fromJson(result as Map<String, dynamic>));
+                  showMessage(context, 'Alvo: ${f.temp(celsius, unitPref, digits: 0)}.');
+                } on ApiException catch (exception) {
+                  setSheetState(() => sheetError = exception.message);
+                }
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+    controller.dispose();
+  }
+
   // ---------------------------------------------------------------------------
 
   @override
@@ -408,7 +492,14 @@ class _UnitPageState extends State<UnitPage> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(child: ReadingTile(metric: Metric.temperature, value: latest?.temperature, limits: expected, unit: prefs.unit, stale: stale)),
+              Expanded(child: ReadingTile(
+                  metric: Metric.temperature,
+                  value: latest?.temperature,
+                  limits: expected,
+                  unit: prefs.unit,
+                  stale: stale,
+                  target: outputs?.usesTarget == true ? outputs?.targetTemperature : null,
+                ),),
               const SizedBox(width: 20),
               Expanded(child: ReadingTile(metric: Metric.humidity, value: latest?.humidity, limits: expected, unit: prefs.unit, stale: stale)),
             ],
@@ -484,10 +575,12 @@ class _UnitPageState extends State<UnitPage> {
 
   Widget _curingCard(CuringUnit current) {
     final phase = current.phase;
-    final elapsed = f.hoursSince(current.dryingStartedAt);
+    final elapsed = current.cycleHours;
     final total = current.estimatedHours;
-    final progress = elapsed != null && total != null && total > 0 ? (elapsed / total).clamp(0.0, 1.0) : null;
+    final progress = current.isDrying && elapsed != null && total != null && total > 0 ? (elapsed / total).clamp(0.0, 1.0) : null;
     final c = context.colors;
+    // Com a secagem parada no meio da cura, a fase em que parou continua marcada.
+    final stageIndex = curingPhases.indexWhere((item) => item.name == current.stage);
 
     Widget check(IconData icon, Color color, String text) => Padding(
           padding: const EdgeInsets.only(top: 6),
@@ -504,18 +597,25 @@ class _UnitPageState extends State<UnitPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          PhaseSteps(current: phase?.number, finished: current.isFinished),
-          if (current.isDrying) ...[
+          PhaseSteps(current: phase?.number ?? (stageIndex < 0 ? null : stageIndex + 1), finished: current.isFinished),
+          if (current.interrupted) ...[
+            const SizedBox(height: 14),
+            Text(
+              'Parada em ${current.stage}${current.pausedAt == null ? '' : ' ${f.relative(current.pausedAt)}'}. O tempo parado não conta.',
+              style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: c.textSecondary),
+            ),
+          ],
+          if (current.isDrying || current.interrupted) ...[
             const SizedBox(height: 16),
             DetailGrid(items: [
               DetailItem(
                 label: 'Nesta fase',
                 value: phase == null
-                    ? f.duration(f.hoursSince(current.stageStartedAt))
+                    ? f.duration(current.stageHours)
                     : '${f.duration(phase.hours)} de ${f.number(phase.minHours, 0)}–${f.number(phase.maxHours, 0)} h',
               ),
-              DetailItem(label: 'Secando há', value: f.duration(elapsed)),
-              if (total != null) DetailItem(label: 'Término previsto', value: f.dateTime(current.estimatedCompletion)),
+              DetailItem(label: 'Secagem total', value: f.duration(elapsed)),
+              if (total != null && current.isDrying) DetailItem(label: 'Término previsto', value: f.dateTime(current.estimatedCompletion)),
             ]),
             if (progress != null) ...[
               const SizedBox(height: 12),
@@ -552,9 +652,9 @@ class _UnitPageState extends State<UnitPage> {
                 BusyButton(label: 'Parar secagem', icon: Icons.stop, style: BusyButtonStyle.danger, onPressed: _stopDrying)
               else
                 BusyButton(
-                  label: current.isFinished ? 'Iniciar nova cura' : 'Iniciar secagem',
+                  label: current.isFinished ? 'Nova estufada' : 'Iniciar secagem',
                   icon: Icons.play_arrow,
-                  onPressed: device == null ? null : _startDrying,
+                  onPressed: device == null ? null : () => _startDrying(current),
                 ),
             ],
           ),
@@ -675,15 +775,21 @@ class _UnitPageState extends State<UnitPage> {
           _OutputRow(
             state: data.humidity,
             confirmedAt: data.confirmedAt,
+            target: data.targetTemperature,
+            unit: prefs.unit,
             onMode: (mode) => _setOutputMode('humidity', mode),
             onEdit: () => _editOutput('humidity', data.humidity),
+            onEditTarget: _editTarget,
           ),
           const Divider(height: 28),
           _OutputRow(
             state: data.temperature,
             confirmedAt: data.confirmedAt,
+            target: data.targetTemperature,
+            unit: prefs.unit,
             onMode: (mode) => _setOutputMode('temperature', mode),
             onEdit: () => _editOutput('temperature', data.temperature),
+            onEditTarget: _editTarget,
           ),
           if (last != null) ...[
             const SizedBox(height: 14),
@@ -782,12 +888,25 @@ class _UnitPageState extends State<UnitPage> {
 }
 
 class _OutputRow extends StatelessWidget {
-  const _OutputRow({required this.state, required this.confirmedAt, required this.onMode, required this.onEdit});
+  const _OutputRow({
+    required this.state,
+    required this.confirmedAt,
+    required this.target,
+    required this.unit,
+    required this.onMode,
+    required this.onEdit,
+    required this.onEditTarget,
+  });
 
   final OutputState state;
   final DateTime? confirmedAt;
+
+  /// Temperatura alvo em °C; só aparece quando a saída segue o alvo.
+  final double? target;
+  final TempUnit unit;
   final ValueChanged<String> onMode;
   final VoidCallback onEdit;
+  final VoidCallback onEditTarget;
 
   @override
   Widget build(BuildContext context) {
@@ -830,6 +949,10 @@ class _OutputRow extends StatelessWidget {
           const SizedBox(width: 6),
           Expanded(child: Text(syncText, style: TextStyle(fontSize: 12.5, color: syncColor))),
         ]),
+        if (state.followsTarget) ...[
+          const SizedBox(height: 10),
+          _TargetRow(target: target, unit: unit, onEdit: onEditTarget),
+        ],
         const SizedBox(height: 10),
         SegmentedButton<String>(
           segments: const [
@@ -844,6 +967,40 @@ class _OutputRow extends StatelessWidget {
           },
         ),
       ],
+    );
+  }
+}
+
+/// Temperatura alvo da ventoinha: o valor e o botão para mudar, ou o aviso para definir.
+class _TargetRow extends StatelessWidget {
+  const _TargetRow({required this.target, required this.unit, required this.onEdit});
+
+  final double? target;
+  final TempUnit unit;
+  final VoidCallback onEdit;
+
+  @override
+  Widget build(BuildContext context) {
+    final missing = target == null;
+    final c = context.colors;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
+      decoration: BoxDecoration(color: missing ? c.warnContainer : c.surface2, borderRadius: BorderRadius.circular(12)),
+      child: Row(
+        children: [
+          Icon(Icons.thermostat, size: 20, color: missing ? c.warn : context.scheme.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: missing
+                ? Text('Defina a temperatura alvo', style: TextStyle(fontWeight: FontWeight.w600, color: c.onWarnContainer))
+                : Text.rich(TextSpan(children: [
+                    TextSpan(text: 'Alvo  ', style: TextStyle(color: c.textSecondary)),
+                    TextSpan(text: f.temp(target, unit), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
+                  ])),
+          ),
+          TextButton(onPressed: onEdit, child: Text(missing ? 'Definir' : 'Alterar')),
+        ],
+      ),
     );
   }
 }
