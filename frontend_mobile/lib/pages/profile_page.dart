@@ -400,15 +400,17 @@ class _HelpCard extends StatelessWidget {
     const flow = [
       (Icons.thermostat, '1. Sender', 'Na estufa, lê temperatura e umidade (SHT40) e transmite por rádio LoRa.'),
       (Icons.sensors, '2. Receiver', 'O gateway recebe o rádio, envia as leituras ao servidor pelo Wi-Fi e recebe de volta o comando das saídas.'),
-      (Icons.space_dashboard_outlined, '3. App', 'O servidor grava o histórico, confere os limites e mostra tudo aqui.'),
+      (Icons.space_dashboard_outlined, '3. App', 'O servidor grava o histórico, confere a faixa da fase da cura e mostra tudo aqui.'),
     ];
     const statuses = [
       ('Sensor online', 'O sender enviou uma leitura nos últimos 90 segundos.'),
       ('Sensor offline', 'Nenhuma leitura recente. Verifique energia, antena LoRa e o Wi-Fi do gateway.'),
       ('Secagem parada', 'O sensor pode estar enviando, mas as leituras não são gravadas nem geram alertas.'),
-      ('Alerta crítico', 'Temperatura acima do máximo definido. Exige atenção imediata.'),
-      ('Alerta de atenção', 'Temperatura abaixo do mínimo ou umidade fora da faixa.'),
-      ('Saída no automático', 'Liga quando o valor sai da faixa segura e desliga quando volta com folga. Com a secagem parada, fica desligada.'),
+      ('Fases da cura', 'Amarelação, Murchamento, Secagem da folha e Secagem do talo. Cada fase tem a própria faixa de temperatura e umidade; você avança quando as folhas estiverem prontas.'),
+      ('Alerta de atenção', 'Valor fora do esperado para a fase, aquecimento rápido ou sensor sem resposta.'),
+      ('Alerta crítico', 'Temperatura ou umidade em nível perigoso para a fase, ou estufa sem leituras há 5 minutos. Exige atenção imediata.'),
+      ('Emergência', 'Temperatura acima de 80 °C na secagem do talo.'),
+      ('Saída no automático', 'Liga quando o valor sai da faixa da fase e desliga quando volta com folga. Com a secagem parada, fica desligada.'),
       ('Aviso sonoro', 'O gateway bipa por 2 segundos sempre que uma saída liga.'),
     ];
     return SectionCard(

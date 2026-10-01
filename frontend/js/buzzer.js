@@ -5,7 +5,7 @@ import { toast } from "./dom.js";
 import * as f from "./format.js";
 import { prefs } from "./store.js";
 
-const POLL_MS = 5000;
+const POLL_MS = 3000;
 
 let audio = null;
 let timer = null;

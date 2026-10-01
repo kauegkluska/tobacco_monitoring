@@ -273,85 +273,6 @@ class _UnitsPageState extends State<UnitsPage> {
     await _load();
   }
 
-  Future<void> _editLimits(Device device) async {
-    final unit = prefs.unit;
-    final symbol = f.unitSymbol(unit);
-    String initial(double value) => f.number(value, 1).replaceAll(',0', '');
-    final tMin = TextEditingController(text: initial(f.tempValue(device.limits.tempMin, unit)!));
-    final tMax = TextEditingController(text: initial(f.tempValue(device.limits.tempMax, unit)!));
-    final hMin = TextEditingController(text: initial(device.limits.humidityMin));
-    final hMax = TextEditingController(text: initial(device.limits.humidityMax));
-    String? sheetError;
-    var saved = false;
-
-    Widget numberField(TextEditingController controller, String label, String suffix) => Expanded(
-          child: TextField(
-            controller: controller,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-            decoration: InputDecoration(labelText: label, suffixText: suffix),
-          ),
-        );
-
-    await _sheet<void>(
-      title: 'Limites de ${device.code}',
-      builder: (sheetContext) => StatefulBuilder(
-        builder: (sheetContext, setSheetState) => Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text('Fora destas faixas o sistema abre um alerta. Ajuste conforme a fase da cura.', style: TextStyle(color: sheetContext.colors.textSecondary)),
-            const SizedBox(height: 14),
-            FormErrorText(sheetError),
-            const Text('Temperatura', style: TextStyle(fontWeight: FontWeight.w700)),
-            const SizedBox(height: 8),
-            Row(children: [numberField(tMin, 'Mínima', symbol), const SizedBox(width: 12), numberField(tMax, 'Máxima', symbol)]),
-            const SizedBox(height: 16),
-            const Text('Umidade relativa', style: TextStyle(fontWeight: FontWeight.w700)),
-            const SizedBox(height: 8),
-            Row(children: [numberField(hMin, 'Mínima', '%'), const SizedBox(width: 12), numberField(hMax, 'Máxima', '%')]),
-            const SizedBox(height: 20),
-            BusyButton(
-              label: 'Salvar limites',
-              onPressed: () async {
-                final values = [tMin, tMax, hMin, hMax].map((c) => double.tryParse(c.text.trim().replaceAll(',', '.'))).toList();
-                String? problem;
-                if (values.any((value) => value == null)) {
-                  problem = 'Preencha todos os limites com números.';
-                } else if (values[0]! >= values[1]!) {
-                  problem = 'A temperatura mínima deve ser menor que a máxima.';
-                } else if (values[2]! >= values[3]!) {
-                  problem = 'A umidade mínima deve ser menor que a máxima.';
-                }
-                if (problem != null) {
-                  setSheetState(() => sheetError = problem);
-                  return;
-                }
-                double round(double value) => (value * 100).round() / 100;
-                try {
-                  await api.post('/devices/${device.id}/thresholds', {
-                    'temp_min': round(f.tempToCelsius(values[0]!, unit)),
-                    'temp_max': round(f.tempToCelsius(values[1]!, unit)),
-                    'humidity_min': values[2],
-                    'humidity_max': values[3],
-                  });
-                  saved = true;
-                  if (sheetContext.mounted) Navigator.pop(sheetContext);
-                } on ApiException catch (exception) {
-                  setSheetState(() => sheetError = exception.message);
-                }
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-    for (final controller in [tMin, tMax, hMin, hMax]) {
-      controller.dispose();
-    }
-    if (!mounted || !saved) return;
-    showMessage(context, 'Limites atualizados.');
-    await _load();
-  }
-
   Future<void> _checkDevice(Device device) async {
     try {
       final result = await api.post('/devices/${device.id}/reconnect') as Map<String, dynamic>;
@@ -508,8 +429,6 @@ class _UnitsPageState extends State<UnitsPage> {
   }
 
   Widget _deviceCard(Device device) {
-    final unit = prefs.unit;
-    final limits = device.limits;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -542,8 +461,6 @@ class _UnitsPageState extends State<UnitsPage> {
             ]),
             const SizedBox(height: 14),
             DetailGrid(items: [
-              DetailItem(label: 'Temperatura segura', value: '${f.temp(limits.tempMin, unit, digits: 0)} a ${f.temp(limits.tempMax, unit, digits: 0)}'),
-              DetailItem(label: 'Umidade segura', value: '${f.number(limits.humidityMin, 0)}% a ${f.number(limits.humidityMax, 0)}%'),
               DetailItem(label: 'Endereço MAC', value: device.macAddress ?? 'Não informado'),
               DetailItem(label: 'Modelo', value: device.hardwareModel ?? '--'),
             ]),
@@ -553,7 +470,6 @@ class _UnitsPageState extends State<UnitsPage> {
               runSpacing: 8,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                FilledButton.icon(onPressed: () => _editLimits(device), icon: const Icon(Icons.tune), label: const Text('Limites')),
                 BusyButton(label: 'Verificar', icon: Icons.refresh, style: BusyButtonStyle.outlined, onPressed: () => _checkDevice(device)),
                 IconButton(
                   tooltip: 'Desvincular ${device.code}',

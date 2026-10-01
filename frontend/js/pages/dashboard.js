@@ -2,8 +2,8 @@
 
 import { api } from "../api.js";
 import { OUTPUT_TRIGGERS, describeOutputEvent } from "../buzzer.js";
-import { lineChart } from "../chart.js";
-import { limitsOf, loadOverview, pickUnit, rangeState, severityInfo, stageOptions } from "../data.js";
+import { lineChart, phaseLegend } from "../chart.js";
+import { PHASES, chartPhases, isSevere, limitsFor, loadOverview, phaseKey, pickUnit, rangeState, severityInfo, stageOptions } from "../data.js";
 import {
   badge,
   banner,
@@ -24,7 +24,7 @@ import {
 import * as f from "../format.js";
 import { prefs } from "../store.js";
 
-const POLL_MS = 5000;
+const POLL_MS = 3000;
 const SERIES_REFRESH_MS = 60_000;
 const CHART_HOURS = 6;
 
@@ -38,6 +38,7 @@ export function renderDashboard(ctx) {
   let seriesLoadedAt = 0;
   let chartNode = null;
   let eventsOpen = false;
+  let stageEditOpen = false;
 
   async function load() {
     try {
@@ -91,7 +92,7 @@ export function renderDashboard(ctx) {
     }
 
     const device = unit.device_id ? devicesById.get(unit.device_id) : null;
-    const limits = limitsOf(device);
+    const limits = limitsFor(unit, device);
     const needsSetup = !device || !unit.is_drying;
 
     clear(
@@ -102,13 +103,13 @@ export function renderDashboard(ctx) {
       h(
         "div",
         { class: "grid grid-2" },
-        kpiCard({ kind: "temp", latest, device, limits }),
-        kpiCard({ kind: "humidity", latest, device, limits }),
+        kpiCard({ kind: "temp", latest, device, limits, unit }),
+        kpiCard({ kind: "humidity", latest, device, limits, unit }),
       ),
       h(
         "div",
         { class: "grid grid-main" },
-        chartCard(limits),
+        chartCard(limits, unit),
         h("div", { class: "stack" }, outputsCard(outputs, unit, device), dryingCard(unit), alertsCard(alerts, unit)),
       ),
     );
@@ -148,7 +149,14 @@ export function renderDashboard(ctx) {
         {},
         h("p", { class: "eyebrow" }, "Visão geral"),
         h("h1", {}, unit ? unit.name : "Bem-vindo"),
-        unit ? h("div", { class: "row", style: { marginTop: "8px" } }, badge("info", unit.curing_stage, "eco"), deviceBadge) : null,
+        unit
+          ? h(
+              "div",
+              { class: "row", style: { marginTop: "8px" } },
+              h("span", { class: `phase-tag phase-${phaseKey(unit.curing_stage) || "other"}` }, h("span", { class: "phase-swatch", "aria-hidden": "true" }), unit.phase ? `Fase ${unit.phase.number} de ${unit.phase.total} · ${unit.curing_stage}` : unit.curing_stage),
+              deviceBadge,
+            )
+          : null,
       ),
       selector ? h("div", { class: "filters" }, selector) : null,
     );
@@ -176,9 +184,11 @@ export function renderDashboard(ctx) {
         [button("Iniciar secagem", { variant: "btn-primary", iconName: "play", onClick: (event) => startDrying(event.currentTarget, unit) })],
       );
     }
-    const critical = alerts.filter((alert) => alert.severity === "critical");
+    const critical = alerts.filter(isSevere);
     if (critical.length) {
-      return banner("crit", "error", `${f.plural(critical.length, "alerta crítico", "alertas críticos")} nesta estufa`, critical[0].message, [
+      const emergency = critical.some((alert) => alert.severity === "emergency");
+      const title = emergency ? "Emergência nesta estufa" : `${f.plural(critical.length, "alerta crítico", "alertas críticos")} nesta estufa`;
+      return banner("crit", "error", title, critical[0].message, [
         button("Ver alertas", { onClick: () => ctx.navigate("#/alertas") }),
       ]);
     }
@@ -190,7 +200,7 @@ export function renderDashboard(ctx) {
     const tempState = rangeState(latest?.temperature, limits.temp_min, limits.temp_max);
     const humidityState = rangeState(latest?.humidity, limits.humidity_min, limits.humidity_max);
     if (tempState === "ok" && humidityState === "ok") {
-      return banner("ok", "checkCircle", "Tudo certo", "Temperatura e umidade estão dentro da faixa definida para esta estufa.");
+      return banner("ok", "checkCircle", "Tudo certo", `Temperatura e umidade estão dentro da faixa da fase de ${unit.curing_stage}.`);
     }
     return banner("info", "clock", "Aguardando as próximas leituras", "Assim que chegarem, os valores aparecem aqui automaticamente.");
   }
@@ -247,7 +257,7 @@ export function renderDashboard(ctx) {
     );
   }
 
-  function kpiCard({ kind, latest, device, limits }) {
+  function kpiCard({ kind, latest, device, limits, unit }) {
     const isTemp = kind === "temp";
     const raw = latest ? (isTemp ? latest.temperature : latest.humidity) : null;
     const min = isTemp ? limits.temp_min : limits.humidity_min;
@@ -304,20 +314,22 @@ export function renderDashboard(ctx) {
         h(
           "div",
           { class: "meter-scale" },
-          h("span", {}, `Faixa segura: ${f.number(displayMin, 0)} a ${f.number(displayMax, 0)} ${unitLabel}`),
+          h("span", {}, `${unit.phase ? "Faixa da fase" : "Faixa segura"}: ${f.number(displayMin, 0)} a ${f.number(displayMax, 0)} ${unitLabel}`),
           h("span", {}, latest ? `Leitura ${f.relative(latest.timestamp)}` : "Sem leituras gravadas"),
         ),
       ),
     );
   }
 
-  function chartCard(limits) {
+  function chartCard(limits, unit) {
+    const phases = chartPhases(series, true);
     if (!chartNode) {
       const points = (series?.points || []).map((point) => ({ t: new Date(point.timestamp), v: f.tempValue(point.temperature), count: point.count }));
       const now = new Date();
       chartNode = lineChart({
         points,
-        limits: { min: f.tempValue(limits.temp_min), max: f.tempValue(limits.temp_max) },
+        limits: phases.length ? null : { min: f.tempValue(limits.temp_min), max: f.tempValue(limits.temp_max) },
+        phases,
         domain: [new Date(now.getTime() - CHART_HOURS * 3_600_000), now],
         format: (value) => `${f.number(value)} ${f.tempUnit()}`,
         detail: (point) => f.plural(point.count, "leitura"),
@@ -333,10 +345,16 @@ export function renderDashboard(ctx) {
       h(
         "div",
         { class: "card-header" },
-        h("div", {}, h("h2", {}, icon("chart"), "Temperatura nas últimas 6 horas"), h("p", { class: "small muted" }, "A faixa verde clara é a zona segura definida nos limites do sensor.")),
+        h(
+          "div",
+          {},
+          h("h2", {}, icon("chart"), "Temperatura nas últimas 6 horas"),
+          h("p", { class: "small muted" }, unit.phase ? "O fundo mostra a fase da cura; a faixa verde clara é a zona segura de cada fase." : "A faixa verde clara é a zona segura."),
+        ),
         h("a", { class: "card-link", href: "#/historico" }, "Histórico", icon("chevronRight")),
       ),
       chartNode,
+      phases.length > 1 ? phaseLegend(phases) : null,
     );
   }
 
@@ -442,7 +460,7 @@ export function renderDashboard(ctx) {
         { class: "form" },
         h("p", { class: "text-2" }, `${relay} do sender. O nome aparece no painel, no app e nas notificações.`),
         field({ label: "Nome", input: nameInput }),
-        field({ label: "No automático, liga quando…", input: triggerSelect, hint: "Os limites mínimo e máximo ficam em Estufas > Limites." }),
+        field({ label: "No automático, liga quando…", input: triggerSelect, hint: "A faixa segura muda com a fase da cura em andamento." }),
       ),
       actions: [
         { label: "Cancelar" },
@@ -499,10 +517,12 @@ export function renderDashboard(ctx) {
   }
 
   function dryingCard(unit) {
+    const phase = unit.phase;
     const elapsed = unit.drying_started_at ? f.hoursSince(unit.drying_started_at) : null;
     const stageHours = f.hoursSince(unit.stage_started_at);
     const total = unit.estimated_duration_hours;
     const progress = elapsed !== null && total ? Math.min(100, (elapsed / total) * 100) : null;
+    const finished = unit.curing_stage === "Finalizado";
 
     const stageSelect = select(stageOptions(unit.curing_stage), unit.curing_stage, {
       "aria-label": "Fase da cura",
@@ -518,26 +538,78 @@ export function renderDashboard(ctx) {
       },
     });
 
+    // As quatro fases em sequência, com a cor de cada uma.
+    const steps = h(
+      "ol",
+      { class: "phase-steps", "aria-label": "Fases da cura" },
+      PHASES.map((item, index) => {
+        const number = index + 1;
+        const status = finished || (phase && number < phase.number) ? "is-done" : phase && number === phase.number ? "is-current" : "";
+        return h(
+          "li",
+          { class: `phase-step phase-${item.key} ${status}`, "aria-current": status === "is-current" ? "step" : null },
+          h("span", { class: "phase-step-bar", "aria-hidden": "true" }),
+          h("span", { class: "phase-step-name" }, status === "is-done" ? icon("check") : null, item.name),
+        );
+      }),
+    );
+
     const details = h(
       "dl",
       { class: "details" },
       h("div", {}, h("dt", {}, "Em secagem há"), h("dd", {}, elapsed !== null ? f.duration(elapsed) : "Parada")),
-      h("div", {}, h("dt", {}, "Nesta fase há"), h("dd", {}, f.duration(stageHours))),
+      h(
+        "div",
+        {},
+        h("dt", {}, "Nesta fase há"),
+        h("dd", { class: phase?.overdue ? "is-bad" : "" }, phase ? `${f.duration(stageHours)} de ${f.number(phase.min_hours, 0)} a ${f.number(phase.max_hours, 0)} h` : f.duration(stageHours)),
+      ),
       h("div", {}, h("dt", {}, "Duração prevista"), h("dd", {}, total ? f.duration(total) : "Não definida")),
       h("div", {}, h("dt", {}, "Término previsto"), h("dd", {}, unit.estimated_completion_at ? f.dateTime(unit.estimated_completion_at) : "--")),
     );
 
+    const phasePanel = phase
+      ? h(
+          "div",
+          { class: `phase-panel phase-${phase.key}` },
+          h(
+            "p",
+            { class: "phase-range" },
+            h("strong", {}, `Fase ${phase.number}: ${phase.name}`),
+            h("span", {}, `${f.temp(phase.temp_min, { digits: 0 })} a ${f.temp(phase.temp_max, { digits: 0 })} · umidade ${f.number(phase.humidity_min, 0)}% a ${f.number(phase.humidity_max, 0)}%`),
+          ),
+          phase.overdue ? h("p", { class: "small phase-overdue" }, icon("warning"), `Passou das ${f.number(phase.max_hours, 0)} h de referência desta fase.`) : null,
+          h("p", { class: "small muted" }, phase.next_stage === "Finalizado" ? "Para finalizar a cura:" : `Para passar para ${phase.next_stage}:`),
+          h(
+            "ul",
+            { class: "phase-checks" },
+            phase.checks.map((check) => h("li", { class: check.ok ? "is-ok" : "" }, icon(check.ok ? "checkCircle" : "clock"), check.label)),
+            h("li", { class: "is-visual" }, icon("eco"), `Confira nas folhas: ${phase.visual_check}`),
+          ),
+        )
+      : null;
+
     const actions = unit.is_drying
-      ? button("Parar secagem", { variant: "btn-danger", iconName: "stop", onClick: (event) => stopDrying(event.currentTarget, unit) })
-      : button("Iniciar secagem", { variant: "btn-primary", iconName: "play", onClick: (event) => startDrying(event.currentTarget, unit) });
+      ? [
+          phase ? advanceButton(unit, phase) : null,
+          button("Parar secagem", { variant: "btn-danger", iconName: "stop", onClick: (event) => stopDrying(event.currentTarget, unit) }),
+        ]
+      : button(finished ? "Iniciar nova cura" : "Iniciar secagem", { variant: "btn-primary", iconName: "play", onClick: (event) => startDrying(event.currentTarget, unit) });
 
     return h(
       "section",
       { class: "card" },
-      h("div", { class: "card-header" }, h("h2", {}, icon("eco"), "Secagem"), unit.is_drying ? badge("ok", "Em andamento") : badge("neutral", "Parada", "stop")),
-      field({ label: "Fase da cura", input: stageSelect }),
+      h("div", { class: "card-header" }, h("h2", {}, icon("eco"), "Secagem"), unit.is_drying ? badge("ok", "Em andamento") : finished ? badge("ok", "Finalizada", "checkCircle") : badge("neutral", "Parada", "stop")),
+      steps,
+      phasePanel,
       h("div", { class: "divider" }),
       details,
+      h(
+        "details",
+        { class: "phase-correct", open: stageEditOpen, onToggle: (event) => (stageEditOpen = event.currentTarget.open) },
+        h("summary", {}, "Corrigir a fase manualmente"),
+        field({ label: "Fase da cura", input: stageSelect }),
+      ),
       progress !== null
         ? h(
             "div",
@@ -579,10 +651,43 @@ export function renderDashboard(ctx) {
     );
   }
 
+  function advanceButton(unit, phase) {
+    const finishing = phase.next_stage === "Finalizado";
+    return button(finishing ? "Finalizar cura" : `Avançar para ${phase.next_stage}`, {
+      variant: phase.ready ? "btn-primary" : "btn-outline",
+      iconName: finishing ? "checkCircle" : "chevronRight",
+      onClick: (event) => advanceStage(event.currentTarget, unit, phase),
+    });
+  }
+
+  async function advanceStage(target, unit, phase) {
+    const finishing = phase.next_stage === "Finalizado";
+    const pending = phase.checks.filter((check) => !check.ok).map((check) => check.label.toLowerCase());
+    const message = [
+      `Confira nas folhas: ${phase.visual_check}`,
+      pending.length ? `Ainda não atingido: ${pending.join("; ")}.` : "As condições de tempo, temperatura e umidade foram atingidas.",
+      finishing ? "A secagem será encerrada e as leituras deixam de ser gravadas." : "Os alarmes e as saídas automáticas passam a usar a faixa da nova fase.",
+    ].join(" ");
+    const confirmed = await confirmDialog({
+      title: finishing ? "Finalizar a cura?" : `Avançar para ${phase.next_stage}?`,
+      message,
+      confirmLabel: finishing ? "Finalizar cura" : "Avançar fase",
+    });
+    if (!confirmed) return;
+    try {
+      await withBusy(target, () => api.post(`/curing_units/${unit.id}/advance-stage`));
+      toast(finishing ? "Cura finalizada." : `Fase alterada para "${phase.next_stage}".`, "success");
+      seriesUnitId = null;
+      load();
+    } catch (error) {
+      toast(error.message, "error");
+    }
+  }
+
   async function startDrying(target, unit) {
     try {
-      await withBusy(target, () => api.post(`/curing_units/${unit.id}/start-drying`));
-      toast("Secagem iniciada. As leituras passam a ser gravadas.", "success");
+      const started = await withBusy(target, () => api.post(`/curing_units/${unit.id}/start-drying`));
+      toast(`Secagem iniciada na fase de ${started.curing_stage}. As leituras passam a ser gravadas.`, "success");
       seriesUnitId = null;
       load();
     } catch (error) {

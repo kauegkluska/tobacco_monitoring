@@ -25,7 +25,7 @@ class AlertCreate(BaseModel):
     message: str = Field(min_length=1, max_length=255)
     curing_unit_id: int
     is_active: bool = True
-    severity: str = Field("warning", pattern="^(info|warning|critical)$")
+    severity: str = Field("warning", pattern="^(info|warning|critical|emergency)$")
 
 
 class AlertActionOut(BaseModel):

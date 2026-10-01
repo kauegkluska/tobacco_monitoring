@@ -34,6 +34,8 @@ def test_legacy_database_is_migrated(tmp_path):
         columns = {row[1]: row for row in connection.execute(text("PRAGMA table_info(curing_units)"))}
         assert columns["device_id"][3] == 0  # device_id deixou de ser NOT NULL
         assert connection.execute(text("SELECT user_id, name FROM curing_units")).fetchone() == (1, "Estufa legado")
+        # "Amarelecimento" virou a fase "Amarelação".
+        assert connection.execute(text("SELECT curing_stage FROM curing_units")).scalar() == "Amarelação"
         assert connection.execute(text("SELECT COUNT(*) FROM readings")).scalar() == 1
         assert connection.execute(text("PRAGMA foreign_key_check")).fetchall() == []
         assert "value" in {row[1] for row in connection.execute(text("PRAGMA table_info(alerts)"))}

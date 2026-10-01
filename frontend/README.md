@@ -11,6 +11,10 @@ Com o backend rodando (veja `backend/README.md`), acesse:
 
 Para servir a pasta separadamente (por exemplo, durante o desenvolvimento), use `python -m http.server 5500 --directory frontend`. Nesse caso, informe o endereço da API em **Alterar servidor**, na tela de login.
 
+## Simulador LoRa (testes)
+
+`http://127.0.0.1:8000/app/simulador.html` faz o papel do sender e do gateway sem hardware: você edita temperatura, umidade, ID, RSSI/SNR e relés, e a página faz o mesmo `POST /readings/readings/` que o `receiver.ino` (mesmo JSON, header `X-API-Key` e timeout de 3 s). Ela também mostra o pacote LoRa e o downlink `RELAY;...`, e pode enviar sozinha a cada 2 s.
+
 ## Telas
 
 | Tela | O que mostra |

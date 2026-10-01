@@ -61,6 +61,19 @@ class SeriesStats(BaseModel):
     last_at: UTCDateTime | None = None
 
 
+class SeriesPhase(BaseModel):
+    """Trecho do período em que a estufa ficou numa fase da cura (recortado ao período pedido)."""
+
+    stage: str
+    key: str | None = None
+    started_at: UTCDateTime
+    ended_at: UTCDateTime
+    temp_min: float | None = None
+    temp_max: float | None = None
+    humidity_min: float | None = None
+    humidity_max: float | None = None
+
+
 class SeriesOut(BaseModel):
     curing_unit_id: int
     since: UTCDateTime
@@ -68,6 +81,7 @@ class SeriesOut(BaseModel):
     bucket_seconds: int
     points: list[SeriesPoint]
     stats: SeriesStats
+    phases: list[SeriesPhase] = []
 
 
 class IngestResult(BaseModel):

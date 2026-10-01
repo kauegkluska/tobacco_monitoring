@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Cores de estado e do gráfico (tokens do DESIGN.md), com variação clara e escura.
+/// Cores de estado, do gráfico e das fases da cura (tokens do DESIGN.md), com variação clara e escura.
 @immutable
 class AppColors extends ThemeExtension<AppColors> {
   const AppColors({
@@ -28,6 +28,8 @@ class AppColors extends ThemeExtension<AppColors> {
     required this.chartBand,
     required this.chartGrid,
     required this.chartLimit,
+    required this.phases,
+    required this.phaseOther,
   });
 
   final Color surface2;
@@ -55,6 +57,12 @@ class AppColors extends ThemeExtension<AppColors> {
   final Color chartGrid;
   final Color chartLimit;
 
+  /// Cor de cada fase da cura, pela chave da API (amarelacao, murchamento, secagem_folha, secagem_talo).
+  final Map<String, Color> phases;
+  final Color phaseOther;
+
+  Color phase(String? key) => phases[key] ?? phaseOther;
+
   static const light = AppColors(
     surface2: Color(0xffeef3ee),
     surface3: Color(0xffe3ebe3),
@@ -80,6 +88,13 @@ class AppColors extends ThemeExtension<AppColors> {
     chartBand: Color(0x122e7d32),
     chartGrid: Color(0xffe4eae3),
     chartLimit: Color(0xff9aa895),
+    phases: {
+      'amarelacao': Color(0xffc99300),
+      'murchamento': Color(0xffd4640a),
+      'secagem_folha': Color(0xff3d8b40),
+      'secagem_talo': Color(0xff2f6db0),
+    },
+    phaseOther: Color(0xff8a948a),
   );
 
   static const dark = AppColors(
@@ -107,6 +122,13 @@ class AppColors extends ThemeExtension<AppColors> {
     chartBand: Color(0x1748a64c),
     chartGrid: Color(0xff293029),
     chartLimit: Color(0xff6b7866),
+    phases: {
+      'amarelacao': Color(0xfff0c541),
+      'murchamento': Color(0xffff9d57),
+      'secagem_folha': Color(0xff7ccb7f),
+      'secagem_talo': Color(0xff80b1ea),
+    },
+    phaseOther: Color(0xff9aa49a),
   );
 
   @override

@@ -1,0 +1,9 @@
+# Chaves e senhas gravadas no firmware (copie de segredos.exemplo.h)
+segredos.h
+
+# Saídas de compilação do Arduino IDE / PlatformIO
+build/
+.pio/
+*.bin
+*.elf
+*.hex

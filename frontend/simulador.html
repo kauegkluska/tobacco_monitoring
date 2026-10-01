@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Simula o sender e o gateway LoRa enviando leituras para a API, para testes." />
+    <meta name="theme-color" content="#2e7d32" />
+    <title>Simulador LoRa</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%232e7d32'/%3E%3Cpath fill='%23fff' d='M7.05 9.05a6 6 0 0 0-.02 8.47c1.26-2.91 3.5-5.35 6.31-6.8a13.67 13.67 0 0 0-4.63 6.66c2.23 1.05 4.97.67 6.81-1.17C18.6 13.13 19 4.43 19 4.43s-8.7.4-11.95 4.62z'/%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght@8..144,400..700&display=swap" />
+    <link rel="stylesheet" href="css/styles.css" />
+    <script>
+      // Mesmo tema escolhido no painel.
+      try {
+        const theme = JSON.parse(localStorage.getItem("monitor.prefs") || "{}").theme;
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch (_) {}
+    </script>
+    <style>
+      .sim {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 24px 16px 48px;
+      }
+      .sim-cols {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: 1fr;
+        align-items: start;
+      }
+      @media (min-width: 1000px) {
+        .sim-cols {
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        }
+      }
+      .check {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        cursor: pointer;
+      }
+      .check input {
+        width: 18px;
+        height: 18px;
+        margin: 2px 0 0;
+        accent-color: var(--primary);
+        flex: none;
+      }
+      .check span {
+        display: flex;
+        flex-direction: column;
+      }
+      .check:has(input:disabled) {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+      .code {
+        margin: 0;
+        padding: 12px 14px;
+        border-radius: var(--radius-sm);
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+        font-size: 0.84rem;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .code-label {
+        margin: 14px 0 6px;
+        font-size: 0.78rem;
+        font-weight: 650;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .code-label:first-child {
+        margin-top: 0;
+      }
+      .relays {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .relay {
+        padding: 12px;
+        border-radius: var(--radius);
+        border: 1px solid var(--border);
+        background: var(--surface-2);
+      }
+      .relay-state {
+        font-weight: 650;
+        font-size: 1.05rem;
+      }
+      .relay.is-on {
+        background: var(--ok-container);
+        color: var(--on-ok-container);
+        border-color: transparent;
+      }
+      .form .divider {
+        margin: 0;
+      }
+      .log-empty {
+        padding: 16px 0 4px;
+        text-align: center;
+      }
+      .status-ok {
+        color: var(--ok);
+        font-weight: 650;
+      }
+      .status-warn {
+        color: var(--warn);
+        font-weight: 650;
+      }
+      .status-crit {
+        color: var(--crit);
+        font-weight: 650;
+      }
+      /* Botões − e + dos campos numéricos (os do navegador ficam escondidos) */
+      .input-group .input {
+        min-width: 0;
+      }
+      .input[type="number"] {
+        -moz-appearance: textfield;
+        appearance: textfield;
+      }
+      .input[type="number"]::-webkit-inner-spin-button,
+      .input[type="number"]::-webkit-outer-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+      .step-btn {
+        display: grid;
+        place-items: center;
+        flex: none;
+        width: 44px;
+        padding: 0;
+        border: 1px solid var(--border-strong);
+        background: var(--surface-2);
+        color: var(--text-2);
+        font-size: 1.3rem;
+        font-weight: 600;
+        line-height: 1;
+        cursor: pointer;
+        user-select: none;
+        touch-action: manipulation;
+      }
+      .step-btn:hover {
+        background: var(--surface-3);
+        color: var(--text);
+      }
+      .step-btn:active {
+        background: var(--primary-container);
+        color: var(--on-primary-container);
+      }
+      .step-btn:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+      .step-down {
+        border-right: 0;
+        border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+      }
+      .step-up {
+        border-left: 0;
+        border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      }
+      .input-group .step-down + .input {
+        border-top-left-radius: 0;
+        border-bottom-left-radius: 0;
+      }
+      .input-group .input-suffix:has(+ .step-up) {
+        border-radius: 0;
+      }
+      @media (max-width: 480px) {
+        .form-row {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="sim page">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">Ferramenta de teste</p>
+          <h1>Simulador LoRa</h1>
+          <p class="page-subtitle">Faz o papel do sender e do gateway: monta o pacote LoRa e envia para a API exatamente como o receiver.ino.</p>
+        </div>
+        <a class="btn btn-outline" href="./">Abrir o painel</a>
+      </header>
+
+      <div class="sim-cols">
+        <div class="stack">
+          <section class="card">
+            <div class="card-header"><h2>Sender (estufa)</h2></div>
+            <form id="sender-form" class="form" autocomplete="off">
+              <label class="field">
+                <span class="field-label">ID do controlador</span>
+                <input class="input" name="controller_id" maxlength="40" required />
+                <span class="field-hint">CONTROLLER_ID do sender.ino. Vai em controller_id e device_code.</span>
+              </label>
+              <div class="form-row">
+                <label class="field">
+                  <span class="field-label">Temperatura</span>
+                  <span class="input-group">
+                    <input class="input num" name="temperature_f" data-stepper="1" type="number" step="0.1" required />
+                    <span class="input-suffix">°F</span>
+                  </span>
+                  <span class="field-hint" id="temp-f"></span>
+                </label>
+                <label class="field">
+                  <span class="field-label">Umidade</span>
+                  <span class="input-group">
+                    <input class="input num" name="humidity" data-stepper="1" type="number" step="0.01" required />
+                    <span class="input-suffix">%</span>
+                  </span>
+                </label>
+              </div>
+              <div class="form-row">
+                <label class="field">
+                  <span class="field-label">RSSI</span>
+                  <span class="input-group">
+                    <input class="input num" name="rssi" data-stepper="1" type="number" step="1" required />
+                    <span class="input-suffix">dBm</span>
+                  </span>
+                </label>
+                <label class="field">
+                  <span class="field-label">SNR</span>
+                  <span class="input-group">
+                    <input class="input num" name="snr" data-stepper="1" type="number" step="1" min="-128" max="127" required />
+                    <span class="input-suffix">dB</span>
+                  </span>
+                </label>
+              </div>
+              <label class="field">
+                <span class="field-label">Contador do pacote (N)</span>
+                <input class="input num" name="n" data-stepper="1" type="number" step="1" min="0" required />
+                <span class="field-hint">Sobe 1 a cada envio, como no sender. O gateway só usa para contar pacotes perdidos.</span>
+              </label>
+
+              <div class="divider" role="separator"></div>
+
+              <label class="check">
+                <input type="checkbox" name="include_relays" />
+                <span><strong>Informar o estado dos relés (R1/R2)</strong><span class="field-hint">Desmarque para imitar um sender antigo, sem relés.</span></span>
+              </label>
+              <label class="check">
+                <input type="checkbox" name="follow_app" />
+                <span><strong>Relés seguem o comando do app</strong><span class="field-hint">Igual ao hardware: o gateway responde com o comando que já tinha guardado, então o estado novo aparece com dois envios de atraso.</span></span>
+              </label>
+              <div class="relays">
+                <label class="check relay" id="r1-box">
+                  <input type="checkbox" name="r1" />
+                  <span><span class="small">R1 · relé de umidade (GPIO2)</span><span class="relay-state" id="r1-state"></span></span>
+                </label>
+                <label class="check relay" id="r2-box">
+                  <input type="checkbox" name="r2" />
+                  <span><span class="small">R2 · relé de temperatura (GPIO3)</span><span class="relay-state" id="r2-state"></span></span>
+                </label>
+              </div>
+
+              <div class="divider" role="separator"></div>
+
+              <label class="check">
+                <input type="checkbox" name="jitter" />
+                <span><strong>Variar os valores a cada envio</strong><span class="field-hint">Soma um valor aleatório até o limite abaixo, para o gráfico não ficar reto.</span></span>
+              </label>
+              <div class="form-row">
+                <label class="field">
+                  <span class="field-label">Variação da temperatura</span>
+                  <span class="input-group">
+                    <input class="input num" name="jitter_t" data-stepper="0.5" type="number" step="0.1" min="0" />
+                    <span class="input-suffix">± °F</span>
+                  </span>
+                </label>
+                <label class="field">
+                  <span class="field-label">Variação da umidade</span>
+                  <span class="input-group">
+                    <input class="input num" name="jitter_h" data-stepper="0.5" type="number" step="0.1" min="0" />
+                    <span class="input-suffix">± %</span>
+                  </span>
+                </label>
+              </div>
+            </form>
+          </section>
+
+          <section class="card">
+            <div class="card-header"><h2>Gateway e servidor</h2></div>
+            <form id="gateway-form" class="form" autocomplete="off">
+              <label class="field">
+                <span class="field-label">Endereço da API</span>
+                <input class="input" name="api_base" placeholder="http://127.0.0.1:8000" required />
+                <span class="field-hint">API_FIXA do receiver.ino, sem o caminho.</span>
+              </label>
+              <label class="field">
+                <span class="field-label">Caminho</span>
+                <input class="input" name="api_path" required />
+              </label>
+              <label class="field">
+                <span class="field-label">Chave da API (X-API-Key)</span>
+                <input class="input" name="api_key" type="password" autocomplete="new-password" spellcheck="false" placeholder="Vazio = sem chave" />
+                <span class="field-hint">GATEWAY_API_KEY do backend/.env. Fica salva só neste navegador.</span>
+              </label>
+              <label class="field">
+                <span class="field-label">Estufa (CURING_UNIT_ID)</span>
+                <input class="input num" name="curing_unit_id" data-stepper="1" type="number" step="1" min="0" required />
+                <span class="field-hint">0 não envia o campo: a API escolhe pela estufa vinculada ao controlador.</span>
+              </label>
+              <label class="field">
+                <span class="field-label">Intervalo do envio automático</span>
+                <span class="input-group">
+                  <input class="input num" name="interval" data-stepper="0.5" type="number" step="0.5" min="0.5" required />
+                  <span class="input-suffix">s</span>
+                </span>
+                <span class="field-hint">INTERVALO_ENVIO do sender é 2 s.</span>
+              </label>
+            </form>
+          </section>
+        </div>
+
+        <div class="stack">
+          <section class="card">
+            <div class="row-between" style="margin-bottom: 14px">
+              <h2>Envio</h2>
+              <span class="badge badge-neutral" id="auto-badge"><span class="badge-dot"></span><span>Parado</span></span>
+            </div>
+            <div class="row">
+              <button type="button" class="btn btn-primary" id="send-once">Enviar um pacote</button>
+              <button type="button" class="btn btn-outline" id="toggle-auto">Iniciar envio automático</button>
+              <button type="button" class="btn btn-ghost" id="reset">Restaurar padrões</button>
+            </div>
+            <p class="field-hint" id="hint" style="margin-top: 10px"></p>
+          </section>
+
+          <section class="card">
+            <div class="card-header"><h2>Próximo pacote</h2></div>
+            <p class="code-label">LoRa · sender → gateway</p>
+            <pre class="code" id="preview-lora"></pre>
+            <p class="code-label">HTTP · gateway → API</p>
+            <pre class="code" id="preview-http"></pre>
+          </section>
+
+          <section class="card">
+            <div class="card-header"><h2>Última resposta</h2><span id="last-status"></span></div>
+            <p class="code-label">Downlink · gateway → sender</p>
+            <pre class="code" id="last-downlink">Nenhum envio ainda.</pre>
+            <p class="code-label">Resposta da API</p>
+            <pre class="code" id="last-response">Nenhum envio ainda.</pre>
+            <p class="code-label">Comando guardado no gateway (vai no próximo downlink)</p>
+            <pre class="code" id="gateway-cache"></pre>
+          </section>
+        </div>
+      </div>
+
+      <section class="card">
+        <div class="row-between" style="margin-bottom: 8px">
+          <h2>Histórico de envios</h2>
+          <button type="button" class="btn btn-ghost btn-sm" id="clear-log">Limpar</button>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Hora</th>
+                <th class="num">N</th>
+                <th class="num">Temp. °F</th>
+                <th class="num">Enviado °C</th>
+                <th class="num">Umid. %</th>
+                <th>R1/R2 enviados</th>
+                <th>HTTP</th>
+                <th>Resultado</th>
+                <th>Comando recebido</th>
+              </tr>
+            </thead>
+            <tbody id="log"></tbody>
+          </table>
+        </div>
+        <p class="muted small log-empty" id="log-empty">Os envios aparecem aqui.</p>
+      </section>
+    </div>
+
+    <!-- Script comum (não module) para funcionar aberto direto do disco (file://). -->
+    <script src="js/simulador.js" defer></script>
+  </body>
+</html>

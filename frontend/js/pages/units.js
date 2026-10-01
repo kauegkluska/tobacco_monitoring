@@ -1,7 +1,7 @@
 // Estufas e dispositivos: cadastro, vínculo do sensor ESP32, limites e desvínculo.
 
 import { api } from "../api.js";
-import { limitsOf, loadOverview, signalQuality, stageOptions } from "../data.js";
+import { loadOverview, signalQuality, stageOptions } from "../data.js";
 import {
   badge,
   banner,
@@ -21,7 +21,7 @@ import {
 import * as f from "../format.js";
 import { prefs } from "../store.js";
 
-const POLL_MS = 10_000;
+const POLL_MS = 3000;
 
 export function renderUnits(ctx) {
   const root = h("div", { class: "page" }, loadingState("Carregando estufas e dispositivos…"));
@@ -119,7 +119,6 @@ export function renderUnits(ctx) {
   }
 
   function deviceCard(device) {
-    const limits = limitsOf(device);
     const online = device.status === "online";
     const batteryLow = device.battery_level !== null && device.battery_level <= 25;
     return h(
@@ -142,15 +141,12 @@ export function renderUnits(ctx) {
       h(
         "dl",
         { class: "details" },
-        h("div", {}, h("dt", {}, "Temperatura segura"), h("dd", {}, `${f.temp(limits.temp_min, { digits: 0 })} a ${f.temp(limits.temp_max, { digits: 0 })}`)),
-        h("div", {}, h("dt", {}, "Umidade segura"), h("dd", {}, `${f.number(limits.humidity_min, 0)}% a ${f.number(limits.humidity_max, 0)}%`)),
         h("div", {}, h("dt", {}, "Endereço MAC"), h("dd", { class: "num" }, device.mac_address || "Não informado")),
         h("div", {}, h("dt", {}, "Modelo"), h("dd", {}, device.hardware_model || "--")),
       ),
       h(
         "div",
         { class: "entity-actions" },
-        button("Limites", { variant: "btn-sm btn-primary", iconName: "tune", onClick: () => editLimits(device) }),
         button("Verificar", {
           variant: "btn-sm btn-outline",
           iconName: "refresh",
@@ -282,51 +278,6 @@ export function renderUnits(ctx) {
             if (unitSelect.value) payload.curing_unit_id = Number(unitSelect.value);
             const device = await api.post("/devices/link", payload);
             toast(`${device.device_code} vinculado${device.curing_unit_name ? ` à ${device.curing_unit_name}` : ""}.`, "success");
-            close();
-            load();
-          },
-        },
-      ],
-    });
-  }
-
-  function editLimits(device) {
-    const limits = limitsOf(device);
-    const unitLabel = f.tempUnit();
-    const numberInput = (value) => h("input", { class: "input num", type: "number", step: 0.5, value: Math.round(value * 10) / 10 });
-    const tMin = numberInput(f.tempValue(limits.temp_min));
-    const tMax = numberInput(f.tempValue(limits.temp_max));
-    const hMin = numberInput(limits.humidity_min);
-    const hMax = numberInput(limits.humidity_max);
-    openModal({
-      title: `Limites de ${device.device_code}`,
-      body: h(
-        "div",
-        { class: "form" },
-        h("p", { class: "text-2" }, "Fora destas faixas o sistema abre um alerta. Ajuste conforme a fase da cura."),
-        h("h3", {}, "Temperatura"),
-        h("div", { class: "form-row" }, field({ label: "Mínima", input: tMin, suffix: unitLabel }), field({ label: "Máxima", input: tMax, suffix: unitLabel })),
-        h("h3", {}, "Umidade relativa"),
-        h("div", { class: "form-row" }, field({ label: "Mínima", input: hMin, suffix: "%" }), field({ label: "Máxima", input: hMax, suffix: "%" })),
-      ),
-      actions: [
-        { label: "Cancelar" },
-        {
-          label: "Salvar limites",
-          variant: "btn-primary",
-          onClick: async (close) => {
-            const inputs = [tMin, tMax, hMin, hMax];
-            const values = inputs.map((input) => Number(input.value));
-            if (inputs.some((input) => input.value.trim() === "") || values.some(Number.isNaN)) throw new Error("Preencha todos os limites com números.");
-            if (values[0] >= values[1]) throw new Error("A temperatura mínima deve ser menor que a máxima.");
-            if (values[2] >= values[3]) throw new Error("A umidade mínima deve ser menor que a máxima.");
-            await api.post(`/devices/${device.id}/thresholds`, {
-              temp_min: Math.round(f.tempToCelsius(values[0]) * 100) / 100,
-              temp_max: Math.round(f.tempToCelsius(values[1]) * 100) / 100,
-              humidity_min: values[2],
-              humidity_max: values[3],
-            });
-            toast("Limites atualizados.", "success");
             close();
             load();
           },

@@ -22,19 +22,20 @@ def commands(response) -> tuple[bool, bool]:
 
 
 def test_outputs_start_off_and_are_read_by_the_firmware(client, auth, drying_unit):
-    response = send_reading(client, 40.0, 60.0)
+    response = send_reading(client, 38.0, 85.0)
     assert response.status_code == 201
     assert response.text.startswith('{"rele_umidade":false,"rele_temperatura":false')
     assert commands(response) == (False, False)
 
 
 def test_auto_mode_turns_on_outside_the_safe_range_with_hysteresis(client, auth, drying_unit):
+    # Amarelação: 35–40 °C e 80–95%.
     unit_id = drying_unit["unit"]["id"]
-    assert commands(send_reading(client, 40.0, 95.0)) == (True, False)
-    # 89,5% ainda está na margem de 1 ponto: a saída continua ligada.
-    assert commands(send_reading(client, 40.0, 89.5)) == (True, False)
-    assert commands(send_reading(client, 40.0, 80.0)) == (False, False)
-    assert commands(send_reading(client, 80.0, 80.0)) == (False, True)
+    assert commands(send_reading(client, 38.0, 97.0)) == (True, False)
+    # 94,5% ainda está na margem de 1 ponto: a saída continua ligada.
+    assert commands(send_reading(client, 38.0, 94.5)) == (True, False)
+    assert commands(send_reading(client, 38.0, 90.0)) == (False, False)
+    assert commands(send_reading(client, 45.0, 90.0)) == (False, True)
 
     outputs = client.get(f"/curing_units/{unit_id}/outputs", headers=auth).json()
     temperature = outputs["temperature"]
@@ -47,7 +48,7 @@ def test_auto_mode_turns_on_outside_the_safe_range_with_hysteresis(client, auth,
         ("humidity", False, "auto"),
         ("humidity", True, "auto"),
     ]
-    assert events[2]["value"] == 95.0
+    assert events[2]["value"] == 97.0
     assert outputs["last_buzzer"]["output"] == "temperature"
     assert outputs["last_buzzer"]["buzzer"] is True
 
@@ -79,13 +80,13 @@ def test_invalid_mode_is_rejected(client, auth, drying_unit):
 
 def test_stopping_the_drying_turns_auto_outputs_off(client, auth, drying_unit):
     unit_id = drying_unit["unit"]["id"]
-    assert commands(send_reading(client, 20.0, 60.0)) == (False, True)
+    assert commands(send_reading(client, 20.0, 85.0)) == (False, True)
 
     client.post(f"/curing_units/{unit_id}/stop-drying", headers=auth)
     outputs = client.get(f"/curing_units/{unit_id}/outputs", headers=auth).json()
     assert outputs["temperature"]["on"] is False
     assert outputs["events"][0]["cause"] == "stopped"
-    assert commands(send_reading(client, 20.0, 60.0)) == (False, False)
+    assert commands(send_reading(client, 20.0, 85.0)) == (False, False)
 
 
 def test_unknown_device_gets_outputs_off(client):
@@ -95,12 +96,12 @@ def test_unknown_device_gets_outputs_off(client):
 
 
 def test_output_events_feed_is_private_and_incremental(client, auth, drying_unit):
-    send_reading(client, 40.0, 95.0)
+    send_reading(client, 38.0, 97.0)
     first = client.get("/output-events/?limit=1", headers=auth).json()
     assert len(first) == 1 and first[0]["curing_unit_name"] == "Estufa 01"
 
     assert client.get(f"/output-events/?after_id={first[0]['id']}", headers=auth).json() == []
-    send_reading(client, 80.0, 95.0)
+    send_reading(client, 45.0, 97.0)
     newer = client.get(f"/output-events/?after_id={first[0]['id']}&buzzer=true", headers=auth).json()
     assert [(e["output"], e["buzzer"]) for e in newer] == [("temperature", True)]
 
@@ -128,15 +129,15 @@ def test_output_can_be_renamed_and_follow_another_rule(client, auth, drying_unit
     assert fans["name"] == "Ventoinhas do forno"
     assert fans["reason"] == "Automático: liga quando a temperatura passar do máximo."
 
-    # Temperatura baixa não liga as ventoinhas (só acima do máximo).
-    assert commands(send_reading(client, 20.0, 60.0)) == (False, True)
-    assert commands(send_reading(client, 80.0, 60.0)) == (True, True)
-    assert commands(send_reading(client, 74.8, 60.0)) == (True, True)  # dentro da margem de 0,5 °C
-    assert commands(send_reading(client, 74.0, 60.0)) == (False, False)
+    # Temperatura baixa não liga as ventoinhas (só acima do máximo da Amarelação, 40 °C).
+    assert commands(send_reading(client, 20.0, 85.0)) == (False, True)
+    assert commands(send_reading(client, 45.0, 85.0)) == (True, True)
+    assert commands(send_reading(client, 39.8, 85.0)) == (True, True)  # dentro da margem de 0,5 °C
+    assert commands(send_reading(client, 39.0, 85.0)) == (False, False)
 
     events = client.get(f"/curing_units/{unit_id}/outputs", headers=auth).json()["events"]
     fans_on = next(e for e in events if e["output"] == "humidity" and e["turned_on"])
-    assert (fans_on["output_name"], fans_on["metric"], fans_on["value"]) == ("Ventoinhas do forno", "temperature", 80.0)
+    assert (fans_on["output_name"], fans_on["metric"], fans_on["value"]) == ("Ventoinhas do forno", "temperature", 45.0)
 
 
 def test_output_name_and_rule_are_validated(client, auth, drying_unit):

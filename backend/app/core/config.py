@@ -29,8 +29,10 @@ class Settings(BaseSettings):
     # Porta em que o uvicorn roda; vai no anúncio mDNS.
     API_PORT: int = 8000
 
-    # Tempo sem leituras até o dispositivo aparecer como offline.
+    # Tempo sem leituras até o dispositivo aparecer como offline (e alerta "Sensor sem resposta").
     DEVICE_OFFLINE_SECONDS: int = 90
+    # Tempo sem leituras, com a secagem ligada, até o alarme crítico "Estufa sem novas leituras".
+    NO_READINGS_ALARM_SECONDS: int = 300
 
     model_config = SettingsConfigDict(
         env_file=BACKEND_DIR / ".env",

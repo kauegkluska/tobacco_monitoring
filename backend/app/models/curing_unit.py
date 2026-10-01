@@ -40,3 +40,6 @@ class CuringUnit(Base):
     readings = relationship("Reading", back_populates="curing_unit")
     alerts = relationship("Alert", back_populates="curing_unit")
     output_events = relationship("OutputEvent", back_populates="curing_unit", cascade="all, delete-orphan")
+    stage_changes = relationship(
+        "StageChange", back_populates="curing_unit", cascade="all, delete-orphan", order_by="StageChange.started_at",
+    )

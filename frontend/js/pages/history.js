@@ -1,8 +1,8 @@
 // Histórico: gráfico por período, resumo (mín/média/máx), tabela e exportação CSV.
 
 import { api } from "../api.js";
-import { lineChart } from "../chart.js";
-import { limitsOf, loadOverview, pickUnit } from "../data.js";
+import { lineChart, phaseLegend } from "../chart.js";
+import { chartPhases, limitsFor, loadOverview, pickUnit } from "../data.js";
 import { banner, button, clear, emptyState, h, icon, loadingState, segmented, select, toast, withBusy } from "../dom.js";
 import * as f from "../format.js";
 import { prefs } from "../store.js";
@@ -62,8 +62,9 @@ export function renderHistory(ctx) {
   function draw() {
     const { overview, unit, series } = state;
     const device = unit.device_id ? overview.devicesById.get(unit.device_id) : null;
-    const limits = limitsOf(device);
+    const limits = limitsFor(unit, device);
     const isTemp = state.metric === "temperature";
+    const phases = chartPhases(series, isTemp);
     const toDisplay = (value) => (isTemp ? f.tempValue(value) : value);
     const format = (value) => (isTemp ? `${f.number(value)} ${f.tempUnit()}` : `${f.number(value)}%`);
     const stats = series.stats;
@@ -120,7 +121,13 @@ export function renderHistory(ctx) {
     const rangeLabel = RANGES.find((range) => range.value === state.range).label;
     const chart = lineChart({
       points,
-      limits: isTemp ? { min: f.tempValue(limits.temp_min), max: f.tempValue(limits.temp_max) } : { min: limits.humidity_min, max: limits.humidity_max },
+      // Com fases no período, cada uma desenha a própria faixa segura.
+      limits: phases.length
+        ? null
+        : isTemp
+          ? { min: f.tempValue(limits.temp_min), max: f.tempValue(limits.temp_max) }
+          : { min: limits.humidity_min, max: limits.humidity_max },
+      phases,
       domain: [new Date(series.since), new Date(series.until)],
       format,
       detail: (point) => (point.count > 1 ? `${format(point.low)} a ${format(point.high)} · ${f.plural(point.count, "leitura")}` : "1 leitura"),
@@ -144,6 +151,7 @@ export function renderHistory(ctx) {
         ),
       ),
       chart,
+      phaseLegend(phases, (phase) => `${f.dateTime(phase.start)} a ${f.dateTime(phase.end)} · faixa ${format(phase.min)} a ${format(phase.max)}`),
     );
 
     clear(
@@ -157,15 +165,19 @@ export function renderHistory(ctx) {
       filters,
       statsRow,
       chartCard,
-      tableCard(format, toDisplay, key),
+      tableCard(format, toDisplay, key, phases),
     );
   }
 
-  function tableCard(format, toDisplay, key) {
+  function tableCard(format, toDisplay, key, phases) {
     const rows = [...state.series.points].reverse();
     const visible = rows.slice(0, state.rows);
     const other = key === "temperature" ? "humidity" : "temperature";
     const formatOther = (value) => (other === "temperature" ? f.temp(value) : f.humidity(value));
+    const phaseAt = (timestamp) => {
+      const time = new Date(timestamp).getTime();
+      return phases.find((phase) => phase.start.getTime() <= time && time <= phase.end.getTime());
+    };
     return h(
       "section",
       { class: "card" },
@@ -184,6 +196,7 @@ export function renderHistory(ctx) {
                   "tr",
                   {},
                   h("th", { scope: "col" }, "Horário"),
+                  phases.length ? h("th", { scope: "col" }, "Fase") : null,
                   h("th", { scope: "col", class: "num" }, key === "temperature" ? "Temperatura" : "Umidade"),
                   h("th", { scope: "col", class: "num" }, "Faixa no intervalo"),
                   h("th", { scope: "col", class: "num" }, other === "temperature" ? "Temperatura" : "Umidade"),
@@ -193,17 +206,21 @@ export function renderHistory(ctx) {
               h(
                 "tbody",
                 {},
-                visible.map((point) =>
-                  h(
+                visible.map((point) => {
+                  const phase = phases.length ? phaseAt(point.timestamp) : null;
+                  return h(
                     "tr",
                     {},
                     h("td", {}, f.dateTime(point.timestamp)),
+                    phases.length
+                      ? h("td", {}, phase ? h("span", { class: `phase-tag phase-${phase.key || "other"}` }, h("span", { class: "phase-swatch", "aria-hidden": "true" }), phase.name) : "--")
+                      : null,
                     h("td", { class: "num" }, format(toDisplay(point[key]))),
                     h("td", { class: "num muted" }, `${format(toDisplay(point[`${key}_min`]))} a ${format(toDisplay(point[`${key}_max`]))}`),
                     h("td", { class: "num" }, formatOther(point[other])),
                     h("td", { class: "num" }, f.number(point.count, 0)),
-                  ),
-                ),
+                  );
+                }),
               ),
             ),
           )

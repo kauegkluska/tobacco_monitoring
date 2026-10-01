@@ -4,15 +4,72 @@ double? _double(dynamic value) => value == null ? null : (value as num).toDouble
 int? _int(dynamic value) => value == null ? null : (value as num).toInt();
 DateTime? _date(dynamic value) => value == null ? null : DateTime.tryParse(value.toString())?.toLocal();
 
-const curingStages = [
-  'Não iniciado',
-  'Início da secagem',
-  'Amarelecimento',
-  'Murcha',
-  'Secagem da folha',
-  'Secagem do talo',
-  'Finalizado',
+/// As quatro fases da cura, na ordem: chave da API (usada nas cores) e nome.
+const curingPhases = [
+  (key: 'amarelacao', name: 'Amarelação'),
+  (key: 'murchamento', name: 'Murchamento'),
+  (key: 'secagem_folha', name: 'Secagem da folha'),
+  (key: 'secagem_talo', name: 'Secagem do talo'),
 ];
+
+const finishedStage = 'Finalizado';
+
+final curingStages = ['Não iniciado', for (final phase in curingPhases) phase.name, finishedStage];
+
+String? phaseKeyOf(String stage) {
+  for (final phase in curingPhases) {
+    if (phase.name == stage) return phase.key;
+  }
+  return null;
+}
+
+class PhaseCheck {
+  PhaseCheck.fromJson(Map<String, dynamic> json)
+      : label = json['label']?.toString() ?? '',
+        ok = json['ok'] == true;
+
+  final String label;
+  final bool ok;
+}
+
+/// Fase em andamento (só com a secagem ligada): faixa de referência e o que falta para avançar.
+class PhaseStatus {
+  PhaseStatus.fromJson(Map<String, dynamic> json)
+      : key = json['key']?.toString() ?? '',
+        name = json['name']?.toString() ?? '',
+        number = _int(json['number']) ?? 1,
+        total = _int(json['total']) ?? 4,
+        limits = Limits(
+          tempMin: _double(json['temp_min'])!,
+          tempMax: _double(json['temp_max'])!,
+          humidityMin: _double(json['humidity_min'])!,
+          humidityMax: _double(json['humidity_max'])!,
+        ),
+        minHours = _double(json['min_hours']) ?? 0,
+        maxHours = _double(json['max_hours']) ?? 0,
+        hours = _double(json['hours']) ?? 0,
+        overdue = json['overdue'] == true,
+        nextStage = json['next_stage']?.toString() ?? finishedStage,
+        ready = json['ready'] == true,
+        checks = ((json['checks'] as List?) ?? const []).map((item) => PhaseCheck.fromJson(item as Map<String, dynamic>)).toList(),
+        visualCheck = json['visual_check']?.toString() ?? '';
+
+  final String key;
+  final String name;
+  final int number;
+  final int total;
+  final Limits limits;
+  final double minHours;
+  final double maxHours;
+  final double hours;
+  final bool overdue;
+  final String nextStage;
+  final bool ready;
+  final List<PhaseCheck> checks;
+  final String visualCheck;
+
+  bool get finishes => nextStage == finishedStage;
+}
 
 class CuringUnit {
   CuringUnit.fromJson(Map<String, dynamic> json)
@@ -25,7 +82,8 @@ class CuringUnit {
         estimatedHours = _double(json['estimated_duration_hours']),
         estimatedCompletion = _date(json['estimated_completion_at']),
         deviceCode = json['device_code']?.toString(),
-        deviceStatus = json['device_status']?.toString();
+        deviceStatus = json['device_status']?.toString(),
+        phase = json['phase'] == null ? null : PhaseStatus.fromJson(json['phase'] as Map<String, dynamic>);
 
   final int id;
   final String name;
@@ -37,6 +95,12 @@ class CuringUnit {
   final DateTime? estimatedCompletion;
   final String? deviceCode;
   final String? deviceStatus;
+  final PhaseStatus? phase;
+
+  bool get isFinished => stage == finishedStage;
+
+  /// Faixa segura: a da fase em andamento; sem secagem, os limites do dispositivo.
+  Limits limitsWith(Device? device) => phase?.limits ?? device?.limits ?? Limits.defaults;
 
   bool get isDrying => dryingStartedAt != null;
 }
@@ -140,7 +204,10 @@ class AlertItem {
   final int unitId;
   final String? unitName;
 
-  bool get isCritical => severity == 'critical';
+  /// Crítico ou emergência: pede ação imediata.
+  bool get isCritical => severity == 'critical' || severity == 'emergency';
+  bool get isEmergency => severity == 'emergency';
+  String get severityLabel => isEmergency ? 'Emergência' : (isCritical ? 'Crítico' : 'Atenção');
   bool get isTemperature => type.startsWith('Temperatura');
   bool get isHigh => type.endsWith('alta');
 }
@@ -187,19 +254,52 @@ class SeriesStats {
   final DateTime? lastAt;
 }
 
+/// Trecho do período em que a estufa ficou numa fase da cura.
+class SeriesPhase {
+  SeriesPhase.fromJson(Map<String, dynamic> json)
+      : stage = json['stage']?.toString() ?? '',
+        key = json['key']?.toString(),
+        start = _date(json['started_at'])!,
+        end = _date(json['ended_at'])!,
+        tempMin = _double(json['temp_min']),
+        tempMax = _double(json['temp_max']),
+        humidityMin = _double(json['humidity_min']),
+        humidityMax = _double(json['humidity_max']);
+
+  final String stage;
+  final String? key;
+  final DateTime start;
+  final DateTime end;
+  final double? tempMin;
+  final double? tempMax;
+  final double? humidityMin;
+  final double? humidityMax;
+
+  bool contains(DateTime time) => !time.isBefore(start) && !time.isAfter(end);
+}
+
 class Series {
   Series.fromJson(Map<String, dynamic> json)
       : since = _date(json['since'])!,
         until = _date(json['until'])!,
         bucketSeconds = json['bucket_seconds'] as int,
         points = (json['points'] as List).map((item) => SeriesPoint.fromJson(item as Map<String, dynamic>)).toList(),
-        stats = SeriesStats.fromJson(json['stats'] as Map<String, dynamic>);
+        stats = SeriesStats.fromJson(json['stats'] as Map<String, dynamic>),
+        phases = ((json['phases'] as List?) ?? const []).map((item) => SeriesPhase.fromJson(item as Map<String, dynamic>)).toList();
 
   final DateTime since;
   final DateTime until;
   final int bucketSeconds;
   final List<SeriesPoint> points;
   final SeriesStats stats;
+  final List<SeriesPhase> phases;
+
+  SeriesPhase? phaseAt(DateTime time) {
+    for (final phase in phases) {
+      if (phase.contains(time)) return phase;
+    }
+    return null;
+  }
 }
 
 class UserProfile {

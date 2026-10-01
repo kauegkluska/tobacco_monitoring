@@ -60,13 +60,18 @@ flowchart LR
 - Temperatura (°F ou °C) e umidade relativa em tempo real, com a faixa segura destacada.
 - Situação da estufa em uma frase: tudo certo, alerta, sensor sem sinal ou secagem parada.
 - Gráficos de 1 hora a 30 dias, com mínima, média e máxima, e exportação para planilha (CSV).
-- Controle da secagem: fase da cura, duração prevista, progresso e término estimado.
+- Cura em quatro fases (Amarelação, Murchamento, Secagem da folha e Secagem do talo), cada uma com a própria faixa de temperatura e umidade. O app mostra o que falta para avançar e o produtor confirma olhando as folhas.
+- Histórico colorido por fase: o fundo do gráfico e a faixa segura mudam a cada fase.
+- Duração prevista, progresso e término estimado.
 - Sinal LoRa (RSSI/SNR) e estado online/offline de cada sensor.
 
 ### Alertas
-- Um alerta por tipo de problema (temperatura alta/baixa, umidade alta/baixa), sem repetição.
-- Fechamento automático quando o valor volta para a faixa, com margem para não ficar abrindo e fechando.
-- Limites configuráveis por sensor; reconhecer e resolver pelo app.
+- Regras de cada fase da cura, com níveis de atenção, crítico e emergência (ex.: na Amarelação, acima de 40 °C por 10 min é atenção e acima de 42 °C por 10 min é crítico).
+- Aquecimento rápido (mais de 1,5 °C por hora em 30 min) no Murchamento e na Secagem da folha.
+- Temperatura abaixo da faixa da fase, depois do aquecimento inicial.
+- Estufa sem novas leituras: atenção após 90 s e crítico após 5 min (sensor, gateway ou Wi-Fi).
+- Um alerta por tipo, sem repetição; ao piorar, abre um novo alerta mais grave e notifica de novo.
+- Fechamento automático quando o valor volta para a faixa, com margem para não ficar abrindo e fechando. Reconhecer e resolver pelo app.
 
 ### Controle das saídas (relés)
 - Dois relés no sender (GPIO2 e GPIO3), com **nome editável**, por exemplo "Ventoinhas".
@@ -254,7 +259,7 @@ flutter build web --release --base-href /mobile/
 
 1. Crie uma conta na tela de login.
 2. Em **Estufas**, cadastre a estufa e vincule o sensor pelo QR code ou pelo ID (ex.: `ESP32-TOBACCO-01`).
-3. No **Início**, toque em **Iniciar secagem**. As leituras passam a ser gravadas e os alertas passam a funcionar.
+3. No **Início**, toque em **Iniciar secagem**. A cura começa na Amarelação, as leituras passam a ser gravadas e os alertas passam a funcionar. Use **Avançar para…** no card Secagem quando as folhas estiverem prontas para a próxima fase.
 4. Em **Saídas e aviso sonoro**, toque no lápis para dar nome aos relés e escolher a regra do automático.
 5. Em **Perfil**, ative **Avisar mesmo com o app fechado** para receber notificações.
 
@@ -270,7 +275,8 @@ Variáveis de `backend/.env` (todas opcionais):
 | `REFRESH_TOKEN_DAYS` | `30` | Validade da sessão. |
 | `GATEWAY_API_KEY` | vazio | Quando definida, o gateway precisa enviar `X-API-Key` com o mesmo valor (`GATEWAY_API_KEY` no `receiver.ino`). |
 | `CORS_ORIGINS` | `*` | Origens liberadas para o navegador, separadas por vírgula. |
-| `DEVICE_OFFLINE_SECONDS` | `90` | Tempo sem leituras até o sensor aparecer como offline. |
+| `DEVICE_OFFLINE_SECONDS` | `90` | Tempo sem leituras até o sensor aparecer como offline e o alerta "Sensor sem resposta". |
+| `NO_READINGS_ALARM_SECONDS` | `300` | Tempo sem leituras, com a secagem ligada, até o alarme crítico "Estufa sem novas leituras". |
 | `MDNS_ENABLED` | `true` | Anuncia a API na rede local para o gateway e o app. |
 | `API_PORT` | `8000` | Porta informada no anúncio mDNS. Mude junto com `--port`. |
 | `DATA_DIR` | `backend/data` | Pasta do banco SQLite e da chave secreta. |
@@ -288,11 +294,11 @@ Principais constantes do firmware:
 ## Testes
 
 ```powershell
-# API: 42 testes (autenticação, leituras, alertas, saídas, mDNS, migração)
+# API: 58 testes (autenticação, leituras, fases, alertas, saídas, mDNS, migração)
 cd backend
 venv\Scripts\python -m pytest
 
-# App: análise estática e 10 testes
+# App: análise estática e 12 testes
 cd frontend_mobile
 flutter analyze
 flutter test

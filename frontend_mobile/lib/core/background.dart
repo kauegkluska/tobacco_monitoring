@@ -93,7 +93,7 @@ class _MonitorTaskHandler extends TaskHandler {
         for (final alert in newAlerts) {
           await _show(
             200000 + alert.id,
-            '${alert.isCritical ? 'Alerta crítico' : 'Alerta'}${alert.unitName == null ? '' : ' · ${alert.unitName}'}',
+            '${alert.isEmergency ? 'Emergência' : alert.isCritical ? 'Alerta crítico' : 'Alerta'}${alert.unitName == null ? '' : ' · ${alert.unitName}'}',
             alert.message,
           );
         }
