@@ -21,7 +21,6 @@ double toFahrenheit(double celsius) => celsius * 9 / 5 + 32;
 double toCelsius(double fahrenheit) => (fahrenheit - 32) * 5 / 9;
 
 String unitSymbol(TempUnit unit) => unit == TempUnit.fahrenheit ? '°F' : '°C';
-TempUnit otherUnit(TempUnit unit) => unit == TempUnit.fahrenheit ? TempUnit.celsius : TempUnit.fahrenheit;
 
 /// Converte °C para a unidade escolhida.
 double? tempValue(double? celsius, TempUnit unit) {
@@ -36,11 +35,13 @@ String temp(double? celsius, TempUnit unit, {int digits = 1}) {
   return '${number(tempValue(celsius, unit), digits)} ${unitSymbol(unit)}';
 }
 
-/// "98,6 °F (37,0 °C)"
-String tempWithOther(double? celsius, TempUnit unit) {
-  if (celsius == null) return '--';
-  return '${temp(celsius, unit)} (${temp(celsius, otherUnit(unit))})';
+/// "95 a 104 °F"
+String tempRange(double min, double max, TempUnit unit) {
+  return '${number(tempValue(min, unit), 0)} a ${number(tempValue(max, unit), 0)} ${unitSymbol(unit)}';
 }
+
+/// "80 a 95%"
+String humidityRange(double min, double max) => '${number(min, 0)} a ${number(max, 0)}%';
 
 String humidity(double? value, {int digits = 1}) => value == null ? '-- %' : '${number(value, digits)}%';
 

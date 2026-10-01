@@ -16,7 +16,7 @@ class ChartPoint {
 }
 
 /// Fase da cura no período: fundo e barra no topo com a [color] da fase e, com [min]/[max],
-/// a faixa segura dela (valores na unidade de exibição).
+/// a faixa esperada dela (valores na unidade de exibição).
 class ChartPhase {
   const ChartPhase({required this.start, required this.end, required this.name, required this.color, this.min, this.max});
 
@@ -30,7 +30,7 @@ class ChartPhase {
   bool contains(DateTime time) => !time.isBefore(start) && !time.isAfter(end);
 }
 
-/// Gráfico de linha de uma série com faixa segura (limites), fases da cura, interrupção onde
+/// Gráfico de linha de uma série com faixa esperada (limites), fases da cura, interrupção onde
 /// faltaram leituras e seleção por toque ou arraste horizontal.
 class LineChart extends StatefulWidget {
   const LineChart({
@@ -418,7 +418,7 @@ class _ChartPainter extends CustomPainter {
       _text(canvas, integerStep ? value.round().toString() : f.number(value), Offset(g.left - 6, py), align: TextAlign.right);
     }
 
-    // Fases da cura: fundo e barra no topo com a cor da fase, faixa segura de cada uma
+    // Fases da cura: fundo e barra no topo com a cor da fase, faixa esperada de cada uma
     final limitPaint = Paint()
       ..color = colors.chartLimit
       ..strokeWidth = 1;
@@ -445,7 +445,7 @@ class _ChartPainter extends CustomPainter {
       }
     }
 
-    // Faixa segura
+    // Faixa esperada
     if (g.limitMin != null || g.limitMax != null) {
       final top = g.limitMax != null ? g.y(g.limitMax!) : g.top;
       final bottom = g.limitMin != null ? g.y(g.limitMin!) : g.bottom;

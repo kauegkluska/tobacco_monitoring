@@ -83,8 +83,8 @@ class _LoginPageState extends State<LoginPage> {
               codeRequested = true;
               if (token != null) _code.text = token;
               info = token != null
-                  ? 'Código gerado e preenchido abaixo (modo de desenvolvimento). Ele vale por 15 minutos.'
-                  : 'Se o login existir, o código foi enviado ao responsável pelo sistema. Ele vale por 15 minutos.';
+                  ? 'Código preenchido abaixo (modo de desenvolvimento). Vale por 15 min.'
+                  : 'Se o login existir, o código foi enviado ao responsável pelo sistema. Vale por 15 min.';
             });
           } else {
             await api.postPublic('/auth/password-reset/confirm', {
@@ -128,8 +128,8 @@ class _LoginPageState extends State<LoginPage> {
   Widget build(BuildContext context) {
     final api = AppScope.of(context).api;
     final titles = {
-      _AuthMode.login: 'Entrar na plataforma',
-      _AuthMode.register: 'Criar conta de produtor',
+      _AuthMode.login: 'Entrar',
+      _AuthMode.register: 'Criar conta',
       _AuthMode.forgot: 'Recuperar senha',
     };
     final submitLabel = switch (mode) {

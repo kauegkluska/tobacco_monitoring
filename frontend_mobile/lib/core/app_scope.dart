@@ -36,12 +36,6 @@ class Overview {
     }
     return null;
   }
-
-  /// Estufa escolhida pelo usuário (lembrada no aparelho) ou a primeira.
-  CuringUnit? pick(int? unitId) {
-    if (units.isEmpty) return null;
-    return units.firstWhere((unit) => unit.id == unitId, orElse: () => units.first);
-  }
 }
 
 Future<Overview> loadOverview(ApiClient api) async {

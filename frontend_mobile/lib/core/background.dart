@@ -188,8 +188,8 @@ class BackgroundMonitor {
     }
     if (permission != NotificationPermission.granted) {
       return permission == NotificationPermission.permanently_denied
-          ? 'As notificações deste app estão bloqueadas. Toque em "Abrir configurações" e ative-as.'
-          : 'Sem a permissão de notificações o app não consegue avisar com ele fechado.';
+          ? 'Notificações bloqueadas. Toque em "Permitir" e ative-as.'
+          : 'Sem permissão de notificações não há avisos com o app fechado.';
     }
     // Sem esta liberação o Android pode pausar o serviço para economizar bateria.
     if (!await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
