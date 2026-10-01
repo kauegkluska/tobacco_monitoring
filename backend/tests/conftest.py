@@ -50,3 +50,42 @@ def drying_unit(client, auth):
 def send_reading(client: TestClient, temperature: float = 40.0, humidity: float = 60.0, **extra):
     payload = {"temperature": temperature, "humidity": humidity, "controller_id": "ESP32-TOBACCO-01", **extra}
     return client.post("/readings/readings/", json=payload)
+
+
+def set_stage(client: TestClient, auth: dict, unit_id: int, stage: str) -> dict:
+    response = client.patch(f"/curing_units/{unit_id}", json={"curing_stage": stage}, headers=auth)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def add_past_readings(unit_id: int, minutes_ago: range, temperature: float, humidity: float = 85.0) -> None:
+    """Grava leituras antigas direto no banco, uma por minuto, para testar regras com duração."""
+    from datetime import timedelta
+
+    from core.clock import utcnow
+    from core.database import SessionLocal
+    from models.reading import Reading
+
+    now = utcnow()
+    with SessionLocal() as db:
+        for minutes in minutes_ago:
+            db.add(Reading(
+                temperature=temperature,
+                humidity=humidity,
+                timestamp=now - timedelta(minutes=minutes),
+                curing_unit_id=unit_id,
+            ))
+        db.commit()
+
+
+def shift_stage_start(unit_id: int, hours: float) -> None:
+    """Faz a fase atual ter começado há mais tempo."""
+    from datetime import timedelta
+
+    from core.database import SessionLocal
+    from models.curing_unit import CuringUnit
+
+    with SessionLocal() as db:
+        unit = db.get(CuringUnit, unit_id)
+        unit.stage_started_at -= timedelta(hours=hours)
+        db.commit()

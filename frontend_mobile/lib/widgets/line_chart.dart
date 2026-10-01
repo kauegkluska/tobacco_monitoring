@@ -15,8 +15,23 @@ class ChartPoint {
   final int count;
 }
 
-/// Gráfico de linha de uma série com faixa segura (limites), interrupção onde faltaram
-/// leituras e seleção por toque ou arraste horizontal.
+/// Fase da cura no período: fundo e barra no topo com a [color] da fase e, com [min]/[max],
+/// a faixa segura dela (valores na unidade de exibição).
+class ChartPhase {
+  const ChartPhase({required this.start, required this.end, required this.name, required this.color, this.min, this.max});
+
+  final DateTime start;
+  final DateTime end;
+  final String name;
+  final Color color;
+  final double? min;
+  final double? max;
+
+  bool contains(DateTime time) => !time.isBefore(start) && !time.isAfter(end);
+}
+
+/// Gráfico de linha de uma série com faixa segura (limites), fases da cura, interrupção onde
+/// faltaram leituras e seleção por toque ou arraste horizontal.
 class LineChart extends StatefulWidget {
   const LineChart({
     required this.points,
@@ -25,6 +40,7 @@ class LineChart extends StatefulWidget {
     required this.end,
     this.limitMin,
     this.limitMax,
+    this.phases = const [],
     this.detail,
     this.gap = const Duration(minutes: 10),
     this.height = 240,
@@ -41,6 +57,7 @@ class LineChart extends StatefulWidget {
   final DateTime end;
   final double? limitMin;
   final double? limitMax;
+  final List<ChartPhase> phases;
   final Duration gap;
   final double height;
   final String semanticLabel;
@@ -86,6 +103,7 @@ class _LineChartState extends State<LineChart> {
         end: widget.end,
         limitMin: widget.limitMin,
         limitMax: widget.limitMax,
+        phases: widget.phases,
         width: constraints.maxWidth,
         height: widget.height,
       );
@@ -111,6 +129,7 @@ class _LineChartState extends State<LineChart> {
                   painter: _ChartPainter(
                     geometry: geometry,
                     points: widget.points,
+                    phases: widget.phases,
                     selected: selected,
                     gap: widget.gap,
                     format: widget.format,
@@ -125,7 +144,14 @@ class _LineChartState extends State<LineChart> {
                     left: (geometry.x(selectedPoint.time) - tooltipWidth / 2).clamp(0.0, math.max(0.0, constraints.maxWidth - tooltipWidth)),
                     top: 0,
                     width: tooltipWidth,
-                    child: IgnorePointer(child: _Tooltip(point: selectedPoint, format: widget.format, detail: widget.detail)),
+                    child: IgnorePointer(
+                      child: _Tooltip(
+                        point: selectedPoint,
+                        format: widget.format,
+                        detail: widget.detail,
+                        phase: widget.phases.where((phase) => phase.contains(selectedPoint.time)).firstOrNull,
+                      ),
+                    ),
                   ),
               ],
             ),
@@ -137,11 +163,12 @@ class _LineChartState extends State<LineChart> {
 }
 
 class _Tooltip extends StatelessWidget {
-  const _Tooltip({required this.point, required this.format, this.detail});
+  const _Tooltip({required this.point, required this.format, this.detail, this.phase});
 
   final ChartPoint point;
   final String Function(double value) format;
   final String? Function(ChartPoint point)? detail;
+  final ChartPhase? phase;
 
   @override
   Widget build(BuildContext context) {
@@ -163,6 +190,12 @@ class _Tooltip extends StatelessWidget {
             ]),
             const SizedBox(height: 2),
             Text(f.fullDate(point.time), style: TextStyle(fontSize: 12, color: context.colors.muted)),
+            if (phase != null)
+              Row(children: [
+                Container(width: 10, height: 10, decoration: BoxDecoration(color: phase!.color, borderRadius: BorderRadius.circular(3))),
+                const SizedBox(width: 6),
+                Flexible(child: Text(phase!.name, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: context.colors.textSecondary))),
+              ]),
             if (extra != null) Text(extra, style: TextStyle(fontSize: 12, color: context.colors.muted)),
           ],
         ),
@@ -224,6 +257,7 @@ class _Geometry {
     required DateTime end,
     required double? limitMin,
     required double? limitMax,
+    required List<ChartPhase> phases,
     required double width,
     required double height,
   }) {
@@ -235,7 +269,12 @@ class _Geometry {
     var endMs = end.millisecondsSinceEpoch.toDouble();
     if (endMs <= startMs) endMs = startMs + 3600000;
 
-    final values = [for (final point in points) point.value, if (limitMin != null) limitMin, if (limitMax != null) limitMax];
+    final values = [
+      for (final point in points) point.value,
+      if (limitMin != null) limitMin,
+      if (limitMax != null) limitMax,
+      for (final phase in phases) ...[if (phase.min != null) phase.min!, if (phase.max != null) phase.max!],
+    ];
     var yMin = values.reduce(math.min);
     var yMax = values.reduce(math.max);
     if (yMax - yMin < 2) {
@@ -312,6 +351,7 @@ class _ChartPainter extends CustomPainter {
   _ChartPainter({
     required this.geometry,
     required this.points,
+    required this.phases,
     required this.selected,
     required this.gap,
     required this.format,
@@ -323,6 +363,7 @@ class _ChartPainter extends CustomPainter {
 
   final _Geometry geometry;
   final List<ChartPoint> points;
+  final List<ChartPhase> phases;
   final int? selected;
   final Duration gap;
   final String Function(double value) format;
@@ -377,14 +418,38 @@ class _ChartPainter extends CustomPainter {
       _text(canvas, integerStep ? value.round().toString() : f.number(value), Offset(g.left - 6, py), align: TextAlign.right);
     }
 
+    // Fases da cura: fundo e barra no topo com a cor da fase, faixa segura de cada uma
+    final limitPaint = Paint()
+      ..color = colors.chartLimit
+      ..strokeWidth = 1;
+    for (final phase in phases) {
+      final x1 = g.x(phase.start).clamp(g.left, g.right);
+      final x2 = g.x(phase.end).clamp(g.left, g.right);
+      if (x2 - x1 < 0.5) continue;
+      canvas.drawRect(Rect.fromLTRB(x1, g.top, x2, g.bottom), Paint()..color = phase.color.withValues(alpha: 0.09));
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(Rect.fromLTRB(x1, g.top - 10, x2, g.top - 5), const Radius.circular(2)),
+        Paint()..color = phase.color,
+      );
+      if (phase.min != null && phase.max != null) {
+        canvas.drawRect(Rect.fromLTRB(x1, g.y(phase.max!), x2, g.y(phase.min!)), Paint()..color = colors.chartBand);
+        for (final value in [phase.min!, phase.max!]) {
+          final py = g.y(value);
+          for (var dx = x1; dx < x2; dx += 7) {
+            canvas.drawLine(Offset(dx, py), Offset(math.min(dx + 4, x2), py), limitPaint);
+          }
+        }
+      }
+      if (x2 - x1 > 84) {
+        _text(canvas, phase.name, Offset(x1 + 6, g.top + 10), color: textColor, weight: FontWeight.w700, halo: true);
+      }
+    }
+
     // Faixa segura
     if (g.limitMin != null || g.limitMax != null) {
       final top = g.limitMax != null ? g.y(g.limitMax!) : g.top;
       final bottom = g.limitMin != null ? g.y(g.limitMin!) : g.bottom;
       canvas.drawRect(Rect.fromLTRB(g.left, top, g.right, bottom), Paint()..color = colors.chartBand);
-      final limitPaint = Paint()
-        ..color = colors.chartLimit
-        ..strokeWidth = 1;
       for (final (label, value) in [('máx', g.limitMax), ('mín', g.limitMin)]) {
         if (value == null) continue;
         final py = g.y(value);
@@ -462,5 +527,7 @@ class _ChartPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_ChartPainter oldDelegate) =>
-      oldDelegate.points != points || oldDelegate.selected != selected || oldDelegate.geometry.right != geometry.right || oldDelegate.colors != colors;
+      oldDelegate.points != points ||
+      oldDelegate.phases != phases ||
+      oldDelegate.selected != selected || oldDelegate.geometry.right != geometry.right || oldDelegate.colors != colors;
 }

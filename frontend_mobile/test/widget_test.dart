@@ -152,6 +152,90 @@ void main() {
     expect(find.text('95,0 °F'), findsOneWidget);
   });
 
+  test('fases da cura na API', () {
+    final unit = CuringUnit.fromJson({
+      'id': 1,
+      'name': 'Estufa 01',
+      'curing_stage': 'Murchamento',
+      'stage_started_at': '2026-09-30T10:00:00Z',
+      'drying_started_at': '2026-09-29T10:00:00Z',
+      'phase': {
+        'key': 'murchamento',
+        'name': 'Murchamento',
+        'number': 2,
+        'total': 4,
+        'temp_min': 40,
+        'temp_max': 48,
+        'humidity_min': 65,
+        'humidity_max': 85,
+        'min_hours': 12,
+        'max_hours': 24,
+        'hours': 13.5,
+        'overdue': false,
+        'next_stage': 'Secagem da folha',
+        'ready': false,
+        'checks': [
+          {'label': 'Pelo menos 12 h nesta fase', 'ok': true},
+          {'label': 'Temperatura em 115 °F (46 °C) ou mais', 'ok': false},
+        ],
+        'visual_check': 'Folhas completamente murchas, moles ao toque.',
+      },
+    });
+    expect(unit.phase!.number, 2);
+    expect(unit.limitsWith(null).tempMax, 48);
+    expect(unit.phase!.checks.where((check) => check.ok).length, 1);
+    expect(unit.phase!.finishes, isFalse);
+    expect(phaseKeyOf('Secagem do talo'), 'secagem_talo');
+    expect(curingStages, ['Não iniciado', 'Amarelação', 'Murchamento', 'Secagem da folha', 'Secagem do talo', 'Finalizado']);
+
+    final stopped = CuringUnit.fromJson({'id': 2, 'curing_stage': 'Não iniciado', 'stage_started_at': '2026-09-30T10:00:00Z'});
+    expect(stopped.phase, isNull);
+    expect(stopped.limitsWith(null).tempMax, Limits.defaults.tempMax);
+
+    final series = Series.fromJson({
+      'since': '2026-09-29T00:00:00Z',
+      'until': '2026-09-30T00:00:00Z',
+      'bucket_seconds': 360,
+      'points': [],
+      'stats': {'count': 0},
+      'phases': [
+        {'stage': 'Amarelação', 'key': 'amarelacao', 'started_at': '2026-09-29T00:00:00Z', 'ended_at': '2026-09-29T12:00:00Z', 'temp_min': 35, 'temp_max': 40},
+        {'stage': 'Murchamento', 'key': 'murchamento', 'started_at': '2026-09-29T12:00:00Z', 'ended_at': '2026-09-30T00:00:00Z', 'temp_min': 40, 'temp_max': 48},
+      ],
+    });
+    expect(series.phaseAt(DateTime.utc(2026, 9, 29, 6).toLocal())?.stage, 'Amarelação');
+    expect(series.phaseAt(DateTime.utc(2026, 9, 29, 18).toLocal())?.key, 'murchamento');
+
+    final alert = AlertItem.fromJson({'id': 1, 'type': 'Temperatura alta', 'severity': 'emergency', 'is_active': true, 'curing_unit_id': 1});
+    expect(alert.isCritical, isTrue);
+    expect(alert.severityLabel, 'Emergência');
+  });
+
+  testWidgets('gráfico mostra a fase do ponto tocado', (tester) async {
+    final start = DateTime(2026, 9, 25, 6);
+    final points = [for (var i = 0; i < 30; i++) ChartPoint(start.add(Duration(minutes: 10 * i)), 36 + i * 0.4)];
+    final middle = start.add(const Duration(hours: 2));
+    await tester.pumpWidget(_wrap(Scaffold(
+      body: SizedBox(
+        width: 360,
+        child: LineChart(
+          points: points,
+          start: start,
+          end: points.last.time,
+          phases: [
+            ChartPhase(start: start, end: middle, name: 'Amarelação', color: AppColors.light.phase('amarelacao'), min: 35, max: 40),
+            ChartPhase(start: middle, end: points.last.time, name: 'Murchamento', color: AppColors.light.phase('murchamento'), min: 40, max: 48),
+          ],
+          format: (value) => '${f.number(value)} °C',
+        ),
+      ),
+    )));
+
+    await tester.tapAt(tester.getTopLeft(find.byType(LineChart)) + const Offset(40, 120));
+    await tester.pump();
+    expect(find.text('Amarelação'), findsOneWidget);
+  });
+
   testWidgets('gráfico vazio explica o motivo', (tester) async {
     await tester.pumpWidget(_wrap(Scaffold(
       body: LineChart(

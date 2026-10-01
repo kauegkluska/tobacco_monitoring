@@ -11,6 +11,7 @@ import '../core/prefs.dart';
 import '../core/theme.dart';
 import '../widgets/common.dart';
 import '../widgets/line_chart.dart';
+import '../widgets/phases.dart';
 import 'shell.dart';
 
 /// Início: situação atual da estufa em linguagem simples.
@@ -108,9 +109,36 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Future<void> _startDrying(CuringUnit target) async {
     try {
-      await api.post('/curing_units/${target.id}/start-drying');
+      final started = await api.post('/curing_units/${target.id}/start-drying') as Map<String, dynamic>;
       if (!mounted) return;
-      showMessage(context, 'Secagem iniciada. As leituras passam a ser gravadas.');
+      showMessage(context, 'Secagem iniciada na fase de ${started['curing_stage']}. As leituras passam a ser gravadas.');
+      seriesUnitId = null;
+      await _load();
+    } on ApiException catch (exception) {
+      if (mounted) showMessage(context, exception.message, error: true);
+    }
+  }
+
+  Future<void> _advanceStage(CuringUnit target, PhaseStatus phase) async {
+    final finishing = phase.finishes;
+    final pending = [for (final check in phase.checks) if (!check.ok) check.label.toLowerCase()];
+    final confirmed = await confirmAction(
+      context,
+      title: finishing ? 'Finalizar a cura?' : 'Avançar para ${phase.nextStage}?',
+      message: [
+        'Confira nas folhas: ${phase.visualCheck}',
+        pending.isEmpty ? 'As condições de tempo, temperatura e umidade foram atingidas.' : 'Ainda não atingido: ${pending.join('; ')}.',
+        finishing
+            ? 'A secagem será encerrada e as leituras deixam de ser gravadas.'
+            : 'Os alarmes e as saídas automáticas passam a usar a faixa da nova fase.',
+      ].join('\n\n'),
+      confirmLabel: finishing ? 'Finalizar cura' : 'Avançar fase',
+    );
+    if (!confirmed) return;
+    try {
+      await api.post('/curing_units/${target.id}/advance-stage');
+      if (!mounted) return;
+      showMessage(context, finishing ? 'Cura finalizada.' : 'Fase alterada para "${phase.nextStage}".');
       seriesUnitId = null;
       await _load();
     } on ApiException catch (exception) {
@@ -193,7 +221,7 @@ class _DashboardPageState extends State<DashboardPage> {
               isExpanded: true,
               decoration: const InputDecoration(
                 labelText: 'No automático, liga quando…',
-                helperText: 'Os limites mínimo e máximo ficam em Estufas > Limites.',
+                helperText: 'A faixa segura muda com a fase da cura em andamento.',
                 helperMaxLines: 2,
               ),
               items: [
@@ -302,17 +330,17 @@ class _DashboardPageState extends State<DashboardPage> {
       builder: (context, _) {
         final current = unit;
         final device = data.deviceFor(current);
-        final limits = device?.limits ?? Limits.defaults;
+        final limits = current?.limitsWith(device) ?? Limits.defaults;
         final children = <Widget>[
           _header(data, current, device),
           if (current == null) _onboarding(data, null, null),
           if (current != null) ...[
             _statusBanner(current, device, limits),
             if ((device == null || !current.isDrying) && latest == null) _onboarding(data, current, device),
-            _KpiCard(kind: _KpiKind.temperature, reading: latest, device: device, limits: limits, unit: prefs.unit),
-            _KpiCard(kind: _KpiKind.humidity, reading: latest, device: device, limits: limits, unit: prefs.unit),
+            _KpiCard(kind: _KpiKind.temperature, reading: latest, device: device, limits: limits, unit: prefs.unit, byPhase: current.phase != null),
+            _KpiCard(kind: _KpiKind.humidity, reading: latest, device: device, limits: limits, unit: prefs.unit, byPhase: current.phase != null),
             _outputsCard(current, device),
-            _chartCard(limits),
+            _chartCard(current, limits),
             _dryingCard(current),
             _alertsCard(current),
           ],
@@ -337,7 +365,11 @@ class _DashboardPageState extends State<DashboardPage> {
   Widget _header(Overview data, CuringUnit? current, Device? device) {
     final badges = <Widget>[];
     if (current != null) {
-      badges.add(StatusBadge(kind: StatusKind.info, label: current.stage, icon: Icons.eco));
+      final phase = current.phase;
+      badges.add(PhaseTag(
+        label: phase == null ? current.stage : 'Fase ${phase.number} de ${phase.total} · ${current.stage}',
+        color: context.colors.phase(phaseKeyOf(current.stage)),
+      ));
       if (device == null) {
         badges.add(const StatusBadge(kind: StatusKind.neutral, label: 'Sem sensor', icon: Icons.link_off));
       } else if (device.online) {
@@ -407,7 +439,9 @@ class _DashboardPageState extends State<DashboardPage> {
       return StatusBanner(
         kind: StatusKind.crit,
         icon: Icons.error,
-        title: '${f.plural(critical.length, 'alerta crítico', 'alertas críticos')} nesta estufa',
+        title: critical.any((alert) => alert.isEmergency)
+            ? 'Emergência nesta estufa'
+            : '${f.plural(critical.length, 'alerta crítico', 'alertas críticos')} nesta estufa',
         text: critical.first.message,
         actions: [OutlinedButton(onPressed: () => widget.actions.goTo(AppTab.alerts), child: const Text('Ver alertas'))],
       );
@@ -425,11 +459,11 @@ class _DashboardPageState extends State<DashboardPage> {
     final tempOk = rangeState(reading?.temperature, limits.tempMin, limits.tempMax) == 'ok';
     final humidityOk = rangeState(reading?.humidity, limits.humidityMin, limits.humidityMax) == 'ok';
     if (tempOk && humidityOk) {
-      return const StatusBanner(
+      return StatusBanner(
         kind: StatusKind.ok,
         icon: Icons.check_circle,
         title: 'Tudo certo',
-        text: 'Temperatura e umidade estão dentro da faixa definida para esta estufa.',
+        text: 'Temperatura e umidade estão dentro da faixa da fase de ${current.stage}.',
       );
     }
     return const StatusBanner(
@@ -513,30 +547,40 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  Widget _chartCard(Limits limits) {
+  Widget _chartCard(CuringUnit current, Limits limits) {
     final unit = prefs.unit;
     final now = DateTime.now();
     final points = [
       for (final point in series?.points ?? const <SeriesPoint>[])
         ChartPoint(point.time, f.tempValue(point.temperature, unit)!, count: point.count),
     ];
+    final phases = series == null ? const <ChartPhase>[] : chartPhasesOf(series!, context.colors, temperature: true, unit: unit);
     return SectionCard(
       title: 'Temperatura nas últimas 6 horas',
       icon: Icons.show_chart,
-      subtitle: 'A faixa verde clara é a zona segura. Toque no gráfico para ver os valores.',
+      subtitle: current.phase == null
+          ? 'A faixa verde clara é a zona segura. Toque no gráfico para ver os valores.'
+          : 'O fundo mostra a fase da cura; a faixa verde clara é a zona segura de cada fase.',
       trailing: TextButton(onPressed: () => widget.actions.goTo(AppTab.history), child: const Text('Histórico')),
-      child: LineChart(
-        points: points,
-        start: now.subtract(const Duration(hours: _chartHours)),
-        end: now,
-        limitMin: f.tempValue(limits.tempMin, unit),
-        limitMax: f.tempValue(limits.tempMax, unit),
-        format: (value) => '${f.number(value)} ${f.unitSymbol(unit)}',
-        detail: (point) => f.plural(point.count, 'leitura'),
-        gap: Duration(seconds: ((series?.bucketSeconds ?? 0) * 3).clamp(300, 1 << 30)),
-        height: 220,
-        semanticLabel: 'Temperatura nas últimas 6 horas',
-        emptyText: 'Nenhuma leitura gravada nas últimas 6 horas.',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          LineChart(
+            points: points,
+            start: now.subtract(const Duration(hours: _chartHours)),
+            end: now,
+            limitMin: phases.isNotEmpty ? null : f.tempValue(limits.tempMin, unit),
+            limitMax: phases.isNotEmpty ? null : f.tempValue(limits.tempMax, unit),
+            phases: phases,
+            format: (value) => '${f.number(value)} ${f.unitSymbol(unit)}',
+            detail: (point) => f.plural(point.count, 'leitura'),
+            gap: Duration(seconds: ((series?.bucketSeconds ?? 0) * 3).clamp(300, 1 << 30)),
+            height: 220,
+            semanticLabel: 'Temperatura nas últimas 6 horas',
+            emptyText: 'Nenhuma leitura gravada nas últimas 6 horas.',
+          ),
+          if (phases.length > 1) PhaseLegend(phases: phases),
+        ],
       ),
     );
   }
@@ -640,29 +684,32 @@ class _DashboardPageState extends State<DashboardPage> {
     final total = current.estimatedHours;
     final progress = elapsed != null && total != null && total > 0 ? (elapsed / total).clamp(0.0, 1.0) : null;
     final stages = curingStages.contains(current.stage) ? curingStages : [current.stage, ...curingStages];
+    final phase = current.phase;
+    final stageHours = f.duration(f.hoursSince(current.stageStartedAt));
 
     return SectionCard(
       title: 'Secagem',
       icon: Icons.eco,
       trailing: current.isDrying
           ? const StatusBadge(kind: StatusKind.ok, label: 'Em andamento')
-          : const StatusBadge(kind: StatusKind.neutral, label: 'Parada', icon: Icons.stop),
+          : current.isFinished
+              ? const StatusBadge(kind: StatusKind.ok, label: 'Finalizada', icon: Icons.check_circle)
+              : const StatusBadge(kind: StatusKind.neutral, label: 'Parada', icon: Icons.stop),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          DropdownButtonFormField<String>(
-            key: ValueKey('stage-${current.id}-${current.stage}'),
-            initialValue: current.stage,
-            decoration: const InputDecoration(labelText: 'Fase da cura'),
-            items: [for (final stage in stages) DropdownMenuItem(value: stage, child: Text(stage))],
-            onChanged: (value) {
-              if (value != null && value != current.stage) _changeStage(current, value);
-            },
-          ),
+          PhaseSteps(current: phase?.number, finished: current.isFinished),
+          if (phase != null) ...[
+            const SizedBox(height: 14),
+            _PhasePanel(phase: phase, unit: prefs.unit),
+          ],
           const SizedBox(height: 16),
           DetailGrid(items: [
             DetailItem(label: 'Em secagem há', value: elapsed == null ? 'Parada' : f.duration(elapsed)),
-            DetailItem(label: 'Nesta fase há', value: f.duration(f.hoursSince(current.stageStartedAt))),
+            DetailItem(
+              label: 'Nesta fase há',
+              value: phase == null ? stageHours : '$stageHours de ${f.number(phase.minHours, 0)} a ${f.number(phase.maxHours, 0)} h',
+            ),
             DetailItem(label: 'Duração prevista', value: total == null ? 'Não definida' : f.duration(total)),
             DetailItem(label: 'Término previsto', value: f.dateTime(current.estimatedCompletion)),
           ]),
@@ -680,15 +727,45 @@ class _DashboardPageState extends State<DashboardPage> {
             spacing: 8,
             runSpacing: 8,
             children: [
+              if (phase != null)
+                BusyButton(
+                  label: phase.finishes ? 'Finalizar cura' : 'Avançar para ${phase.nextStage}',
+                  icon: phase.finishes ? Icons.check_circle : Icons.skip_next,
+                  style: phase.ready ? BusyButtonStyle.filled : BusyButtonStyle.outlined,
+                  onPressed: () => _advanceStage(current, phase),
+                ),
               current.isDrying
                   ? BusyButton(label: 'Parar secagem', icon: Icons.stop, style: BusyButtonStyle.danger, onPressed: () => _stopDrying(current))
-                  : BusyButton(label: 'Iniciar secagem', icon: Icons.play_arrow, onPressed: () => _startDrying(current)),
+                  : BusyButton(
+                      label: current.isFinished ? 'Iniciar nova cura' : 'Iniciar secagem',
+                      icon: Icons.play_arrow,
+                      onPressed: () => _startDrying(current),
+                    ),
               OutlinedButton.icon(
                 onPressed: () => _editDuration(current),
                 icon: const Icon(Icons.schedule),
                 label: Text(total == null ? 'Definir duração' : 'Alterar duração'),
               ),
             ],
+          ),
+          Theme(
+            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+            child: ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              childrenPadding: const EdgeInsets.only(bottom: 4),
+              title: const Text('Corrigir a fase manualmente', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
+              children: [
+                DropdownButtonFormField<String>(
+                  key: ValueKey('stage-${current.id}-${current.stage}'),
+                  initialValue: current.stage,
+                  decoration: const InputDecoration(labelText: 'Fase da cura'),
+                  items: [for (final stage in stages) DropdownMenuItem(value: stage, child: Text(stage))],
+                  onChanged: (value) {
+                    if (value != null && value != current.stage) _changeStage(current, value);
+                  },
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -714,7 +791,7 @@ class _DashboardPageState extends State<DashboardPage> {
                       alert.isCritical ? Icons.error : Icons.warning_amber_rounded,
                       color: alert.isCritical ? context.colors.crit : context.colors.warn,
                     ),
-                    title: Text('${alert.type} · ${alert.isCritical ? 'Crítico' : 'Atenção'}', style: const TextStyle(fontWeight: FontWeight.w600)),
+                    title: Text('${alert.type} · ${alert.severityLabel}', style: const TextStyle(fontWeight: FontWeight.w600)),
                     subtitle: Text('${alert.message}\n${f.relative(alert.timestamp)}'),
                     isThreeLine: true,
                   ),
@@ -814,13 +891,16 @@ class _OutputRow extends StatelessWidget {
 enum _KpiKind { temperature, humidity }
 
 class _KpiCard extends StatelessWidget {
-  const _KpiCard({required this.kind, required this.reading, required this.device, required this.limits, required this.unit});
+  const _KpiCard({required this.kind, required this.reading, required this.device, required this.limits, required this.unit, this.byPhase = false});
 
   final _KpiKind kind;
   final Reading? reading;
   final Device? device;
   final Limits limits;
   final TempUnit unit;
+
+  /// A faixa é a da fase da cura em andamento.
+  final bool byPhase;
 
   @override
   Widget build(BuildContext context) {
@@ -896,7 +976,7 @@ class _KpiCard extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      'Faixa segura: ${f.number(displayMin, 0)} a ${f.number(displayMax, 0)} $symbol',
+                      '${byPhase ? 'Faixa da fase' : 'Faixa segura'}: ${f.number(displayMin, 0)} a ${f.number(displayMax, 0)} $symbol',
                       style: TextStyle(fontSize: 12.5, color: context.colors.muted),
                     ),
                   ),
@@ -961,5 +1041,58 @@ class _RangeMeter extends StatelessWidget {
         ),
       );
     });
+  }
+}
+
+/// Fase em andamento: faixa de referência e o que falta para passar à próxima.
+class _PhasePanel extends StatelessWidget {
+  const _PhasePanel({required this.phase, required this.unit});
+
+  final PhaseStatus phase;
+  final TempUnit unit;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final color = colors.phase(phase.key);
+    final limits = phase.limits;
+
+    Widget item(IconData icon, Color iconColor, String text) => Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Icon(icon, size: 18, color: iconColor),
+            const SizedBox(width: 8),
+            Expanded(child: Text(text, style: TextStyle(fontSize: 13.5, color: colors.textSecondary))),
+          ]),
+        );
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: Color.alphaBlend(color.withValues(alpha: 0.09), context.scheme.surface),
+        borderRadius: BorderRadius.circular(12),
+        border: Border(left: BorderSide(color: color, width: 4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Fase ${phase.number}: ${phase.name}', style: const TextStyle(fontWeight: FontWeight.w800)),
+          const SizedBox(height: 2),
+          Text(
+            '${f.temp(limits.tempMin, unit, digits: 0)} a ${f.temp(limits.tempMax, unit, digits: 0)} · '
+            'umidade ${f.number(limits.humidityMin, 0)}% a ${f.number(limits.humidityMax, 0)}%',
+            style: TextStyle(fontSize: 13.5, color: colors.textSecondary),
+          ),
+          if (phase.overdue) item(Icons.warning_amber_rounded, colors.warn, 'Passou das ${f.number(phase.maxHours, 0)} h de referência desta fase.'),
+          const SizedBox(height: 8),
+          Text(
+            phase.finishes ? 'Para finalizar a cura:' : 'Para passar para ${phase.nextStage}:',
+            style: TextStyle(fontSize: 12.5, color: colors.muted),
+          ),
+          for (final check in phase.checks) item(check.ok ? Icons.check_circle : Icons.schedule, check.ok ? colors.ok : colors.muted, check.label),
+          item(Icons.eco, color, 'Confira nas folhas: ${phase.visualCheck}'),
+        ],
+      ),
+    );
   }
 }

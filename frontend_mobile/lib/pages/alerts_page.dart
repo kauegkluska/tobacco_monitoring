@@ -207,7 +207,7 @@ class _AlertCard extends StatelessWidget {
     final (kind, label, icon, accent, iconBackground) = !alert.isActive
         ? (StatusKind.ok, 'Resolvido', Icons.check_circle, c.border, c.okContainer)
         : alert.isCritical
-            ? (StatusKind.crit, 'Crítico', Icons.error, c.crit, c.critContainer)
+            ? (StatusKind.crit, alert.severityLabel, Icons.error, c.crit, c.critContainer)
             : (StatusKind.warn, 'Atenção', Icons.warning_amber_rounded, c.warn, c.warnContainer);
     final iconColor = !alert.isActive ? c.ok : (alert.isCritical ? c.crit : c.warn);
     final expected = alert.threshold == null ? '--' : '${alert.isHigh ? 'Até' : 'A partir de'} ${_describe(alert.threshold)}';

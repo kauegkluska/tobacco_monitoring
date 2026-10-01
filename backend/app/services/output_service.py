@@ -7,7 +7,8 @@ from core.config import settings
 from models.curing_unit import CuringUnit
 from models.output_event import OutputEvent
 from models.reading import Reading
-from services.alert_engine import HUMIDITY_HYSTERESIS, TEMPERATURE_HYSTERESIS_C, _limit
+from services.alert_engine import HUMIDITY_HYSTERESIS, TEMPERATURE_HYSTERESIS_C
+from services.phases import limits_for
 
 OUTPUT_MODES = ("auto", "on", "off")
 # "humidity" é o relé 1 do sender (GPIO2) e "temperature" o relé 2 (GPIO3).
@@ -69,30 +70,30 @@ def update_outputs(
     temperature: float | None = None,
     humidity: float | None = None,
 ) -> None:
-    """Atualiza o comando das saídas e registra cada mudança (ligar dispara o aviso sonoro do gateway)."""
-    device = unit.device
-    drying = unit.drying_started_at is not None
+    """Atualiza o comando das saídas e registra cada mudança (ligar dispara o aviso sonoro do gateway).
+
+    No automático, a faixa segura é a da fase da cura em andamento.
+    """
+    limits = limits_for(unit)
     now = utcnow()
-    metrics = {
-        "humidity": (humidity, _limit(device, "humidity_min"), _limit(device, "humidity_max"), HUMIDITY_HYSTERESIS),
-        "temperature": (
-            temperature, _limit(device, "temp_min"), _limit(device, "temp_max"), TEMPERATURE_HYSTERESIS_C,
-        ),
-    }
 
     for output in OUTPUTS:
         metric, direction, _, _ = TRIGGERS[trigger_of(unit, output)]
-        value, low, high, margin = metrics[metric]
         mode = _get(unit, output, "mode") or "auto"
         current = bool(_get(unit, output, "on"))
+        value = humidity if metric == "humidity" else temperature
 
         if mode == "on":
             new_state, cause = True, "manual"
         elif mode == "off":
             new_state, cause = False, "manual"
-        elif not drying:
+        elif limits is None:
             new_state, cause = False, "stopped"
         else:
+            if metric == "humidity":
+                low, high, margin = limits["humidity_min"], limits["humidity_max"], HUMIDITY_HYSTERESIS
+            else:
+                low, high, margin = limits["temp_min"], limits["temp_max"], TEMPERATURE_HYSTERESIS_C
             new_state, cause = _auto_state(current, value, low, high, margin, direction), "auto"
 
         if new_state == current:

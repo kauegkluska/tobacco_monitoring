@@ -1,5 +1,5 @@
 from core.config import settings
-from conftest import register, send_reading
+from conftest import register, send_reading, set_stage
 
 
 def test_register_validates_input(client):
@@ -100,8 +100,9 @@ def test_unknown_device_is_registered_for_linking(client, auth):
 
 
 def test_alerts_are_deduplicated_and_resolved(client, auth, drying_unit):
+    set_stage(client, auth, drying_unit["unit"]["id"], "Murchamento")
     for _ in range(3):
-        send_reading(client, temperature=80.0)
+        send_reading(client, temperature=53.0, humidity=70.0)
 
     active = client.get("/alerts/?active=true", headers=auth).json()
     assert len(active) == 1
@@ -109,21 +110,29 @@ def test_alerts_are_deduplicated_and_resolved(client, auth, drying_unit):
     assert active[0]["severity"] == "critical"
     assert active[0]["curing_unit_name"] == "Estufa 01"
 
-    send_reading(client, temperature=50.0)
+    send_reading(client, temperature=45.0, humidity=70.0)
     assert client.get("/alerts/?active=true", headers=auth).json() == []
     assert len(client.get("/alerts/?active=false", headers=auth).json()) == 1
 
 
-def test_alerts_follow_device_thresholds(client, auth, drying_unit):
-    device_id = drying_unit["device"]["id"]
-    client.post(
-        f"/devices/{device_id}/thresholds",
-        json={"temp_min": 30, "temp_max": 45, "humidity_min": 50, "humidity_max": 70},
-        headers=auth,
-    )
-    send_reading(client, temperature=46.0, humidity=45.0)
-    types = {alert["type"] for alert in client.get("/alerts/", headers=auth).json()}
-    assert types == {"Temperatura alta", "Umidade baixa"}
+def test_alerts_follow_the_phase_and_escalate(client, auth, drying_unit):
+    set_stage(client, auth, drying_unit["unit"]["id"], "Murchamento")
+    send_reading(client, temperature=51.0, humidity=55.0)
+    active = {alert["type"]: alert for alert in client.get("/alerts/?active=true", headers=auth).json()}
+    assert set(active) == {"Temperatura alta", "Umidade baixa"}
+    assert active["Temperatura alta"]["severity"] == "warning"
+    assert active["Temperatura alta"]["threshold"] == 50
+    assert "na fase de Murchamento" in active["Temperatura alta"]["message"]
+
+    # Passou de 52 °C: o alerta de atenção fecha e abre um crítico (nova notificação).
+    send_reading(client, temperature=52.5, humidity=55.0)
+    temperature = [alert for alert in client.get("/alerts/", headers=auth).json() if alert["type"] == "Temperatura alta"]
+    assert [(alert["severity"], alert["is_active"]) for alert in temperature] == [("critical", True), ("warning", False)]
+
+    # Voltar a 51 °C não rebaixa o alerta crítico.
+    send_reading(client, temperature=51.0, humidity=55.0)
+    active = [alert for alert in client.get("/alerts/?active=true", headers=auth).json() if alert["type"] == "Temperatura alta"]
+    assert [alert["severity"] for alert in active] == ["critical"]
 
 
 def test_thresholds_must_be_ordered(client, auth, drying_unit):
@@ -136,7 +145,8 @@ def test_thresholds_must_be_ordered(client, auth, drying_unit):
 
 
 def test_acknowledge_and_resolve_alert(client, auth, drying_unit):
-    send_reading(client, temperature=80.0)
+    set_stage(client, auth, drying_unit["unit"]["id"], "Murchamento")
+    send_reading(client, temperature=53.0, humidity=70.0)
     alert = client.get("/alerts/", headers=auth).json()[0]
 
     acknowledged = client.post(f"/alerts/{alert['id']}/acknowledge", headers=auth).json()
@@ -147,7 +157,8 @@ def test_acknowledge_and_resolve_alert(client, auth, drying_unit):
 
 
 def test_alerts_are_private(client, auth, drying_unit):
-    send_reading(client, temperature=80.0)
+    set_stage(client, auth, drying_unit["unit"]["id"], "Murchamento")
+    send_reading(client, temperature=53.0, humidity=70.0)
     alert_id = client.get("/alerts/", headers=auth).json()[0]["id"]
 
     other = register(client, login="vizinho")
@@ -253,10 +264,10 @@ def test_estimate_and_update(client, auth, drying_unit):
     unit_id = drying_unit["unit"]["id"]
     updated = client.patch(
         f"/curing_units/{unit_id}",
-        json={"curing_stage": "Amarelecimento", "estimated_duration_hours": 48},
+        json={"curing_stage": "Murchamento", "estimated_duration_hours": 48},
         headers=auth,
     ).json()
-    assert updated["curing_stage"] == "Amarelecimento"
+    assert updated["curing_stage"] == "Murchamento"
     assert updated["estimated_completion_at"] is not None
 
     estimate = client.get(f"/curing_units/{unit_id}/estimate", headers=auth).json()

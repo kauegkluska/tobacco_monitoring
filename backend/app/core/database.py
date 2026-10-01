@@ -200,6 +200,29 @@ def initialize_database(target_engine=None) -> None:
         add_column("curing_units", "outputs_confirmed_at", "DATETIME")
         add_column("output_events", "metric", "VARCHAR(20)")
 
+        # A cura passou a ter quatro fases (Amarelação, Murchamento, Secagem da folha e do talo).
+        for old, new in (("Início da secagem", "Amarelação"), ("Amarelecimento", "Amarelação"), ("Murcha", "Murchamento")):
+            connection.execute(
+                text("UPDATE curing_units SET curing_stage = :new WHERE curing_stage = :old"), {"old": old, "new": new},
+            )
+        connection.execute(text(
+            "UPDATE curing_units SET curing_stage = 'Amarelação' "
+            "WHERE drying_started_at IS NOT NULL AND curing_stage IN ('Não iniciado', 'Finalizado')"
+        ))
+        # Tipos de alerta que as regras das fases não usam mais: sem isso ficariam abertos para sempre.
+        connection.execute(text(
+            "UPDATE alerts SET is_active = 0, resolved_at = CURRENT_TIMESTAMP "
+            "WHERE is_active = 1 AND type IN ('Temperatura baixa', 'Umidade alta')"
+        ))
+        # Secagens em andamento antes do histórico de fases: começa um trecho com a fase atual.
+        connection.execute(text(
+            "INSERT INTO stage_changes (curing_unit_id, stage, started_at) "
+            "SELECT id, curing_stage, MAX(stage_started_at, drying_started_at) FROM curing_units "
+            "WHERE drying_started_at IS NOT NULL AND NOT EXISTS ("
+            "SELECT 1 FROM stage_changes WHERE stage_changes.curing_unit_id = curing_units.id "
+            "AND stage_changes.ended_at IS NULL)"
+        ))
+
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_curing_units_id ON curing_units (id)"))
         connection.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_readings_unit_timestamp ON readings (curing_unit_id, timestamp)"

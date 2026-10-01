@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -7,13 +9,14 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from core.config import settings
-from core.database import initialize_database
+from core.database import SessionLocal, initialize_database
 from core.discovery import DiscoveryAnnouncer
 from models.alert import Alert  # noqa: F401  (registra os modelos antes do create_all)
 from models.curing_unit import CuringUnit  # noqa: F401
 from models.device import Device  # noqa: F401
 from models.output_event import OutputEvent  # noqa: F401
 from models.reading import Reading  # noqa: F401
+from models.stage_change import StageChange  # noqa: F401
 from models.user import User  # noqa: F401
 from routers.alerts import router as alerts_router
 from routers.auth import router as auth_router
@@ -22,10 +25,31 @@ from routers.devices import router as devices_router
 from routers.output_events import router as output_events_router
 from routers.readings import router as readings_router
 from routers.users import router as users_router
+from services.alert_engine import check_missing_readings
 
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
 # App Flutter compilado para web (flutter build web --base-href /mobile/).
 MOBILE_WEB_DIR = Path(__file__).resolve().parents[2] / "frontend_mobile" / "build" / "web"
+
+
+# Intervalo da verificação de estufas em secagem que pararam de receber leituras.
+MISSING_READINGS_CHECK_SECONDS = 30
+logger = logging.getLogger("uvicorn.error")
+
+
+def _check_missing_readings() -> None:
+    with SessionLocal() as db:
+        check_missing_readings(db)
+
+
+async def _watch_missing_readings() -> None:
+    # Sem leituras não há requisição para avaliar, então a verificação roda em segundo plano.
+    while True:
+        await asyncio.sleep(MISSING_READINGS_CHECK_SECONDS)
+        try:
+            await asyncio.to_thread(_check_missing_readings)
+        except Exception:
+            logger.exception("Falha ao verificar estufas sem leituras")
 
 
 @asynccontextmanager
@@ -33,9 +57,11 @@ async def lifespan(_app: FastAPI):
     initialize_database()
     announcer = DiscoveryAnnouncer()
     await announcer.start()
+    watcher = asyncio.create_task(_watch_missing_readings())
     try:
         yield
     finally:
+        watcher.cancel()
         await announcer.stop()
 
 

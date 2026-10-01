@@ -1,11 +1,11 @@
 // Central de alertas: ativos, resolvidos e todos, com reconhecer e resolver.
 
 import { api } from "../api.js";
-import { severityInfo } from "../data.js";
+import { isSevere, severityInfo } from "../data.js";
 import { badge, banner, button, clear, confirmDialog, emptyState, h, icon, loadingState, select, toast, withBusy } from "../dom.js";
 import * as f from "../format.js";
 
-const POLL_MS = 15_000;
+const POLL_MS = 3000;
 const TABS = [
   { value: "active", label: "Ativos" },
   { value: "resolved", label: "Resolvidos" },
@@ -53,7 +53,7 @@ export function renderAlerts(ctx) {
       resolved: byUnit.filter((alert) => !alert.is_active).length,
       all: byUnit.length,
     };
-    const critical = byUnit.filter((alert) => alert.is_active && alert.severity === "critical").length;
+    const critical = byUnit.filter((alert) => alert.is_active && isSevere(alert)).length;
 
     const tabs = h(
       "div",

@@ -8,6 +8,7 @@ import '../core/prefs.dart';
 import '../core/theme.dart';
 import '../widgets/common.dart';
 import '../widgets/line_chart.dart';
+import '../widgets/phases.dart';
 import 'shell.dart';
 
 class _Range {
@@ -126,7 +127,7 @@ class _HistoryPageState extends State<HistoryPage> {
       listenable: prefs,
       builder: (context, _) {
         final device = data.deviceFor(current);
-        final limits = device?.limits ?? Limits.defaults;
+        final limits = current.limitsWith(device);
         final unitPref = prefs.unit;
         double convert(double value) => temperature ? f.tempValue(value, unitPref)! : value;
         String format(double value) => temperature ? '${f.number(value)} ${f.unitSymbol(unitPref)}' : '${f.number(value)}%';
@@ -258,25 +259,38 @@ class _HistoryPageState extends State<HistoryPage> {
           count: point.count,
         ),
     ];
+    final phases = chartPhasesOf(data, context.colors, temperature: temperature, unit: unitPref);
     final bucketNote = data.bucketSeconds > 60 ? 'Cada ponto é a média de ${f.duration(data.bucketSeconds / 3600)} de leituras. ' : '';
     return SectionCard(
       title: '${temperature ? 'Temperatura' : 'Umidade relativa'} · ${range.label}',
       icon: temperature ? Icons.thermostat : Icons.water_drop,
       subtitle: '${bucketNote}Toque ou arraste no gráfico para ver os valores.',
-      child: LineChart(
-        points: points,
-        start: data.since,
-        end: data.until,
-        limitMin: temperature ? f.tempValue(limits.tempMin, unitPref) : limits.humidityMin,
-        limitMax: temperature ? f.tempValue(limits.tempMax, unitPref) : limits.humidityMax,
-        format: format,
-        detail: (point) => point.count > 1 ? '${format(point.low!)} a ${format(point.high!)} · ${f.plural(point.count, 'leitura')}' : '1 leitura',
-        gap: Duration(seconds: (data.bucketSeconds * 3).clamp(300, 1 << 30)),
-        height: 260,
-        semanticLabel: '${temperature ? 'Temperatura' : 'Umidade'} no período de ${range.label}',
-        emptyText: current.isDrying
-            ? 'Nenhuma leitura neste período.'
-            : 'Nenhuma leitura neste período. As leituras só são gravadas com a secagem em andamento.',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          LineChart(
+            points: points,
+            start: data.since,
+            end: data.until,
+            // Com fases no período, cada uma desenha a própria faixa segura.
+            limitMin: phases.isNotEmpty ? null : (temperature ? f.tempValue(limits.tempMin, unitPref) : limits.humidityMin),
+            limitMax: phases.isNotEmpty ? null : (temperature ? f.tempValue(limits.tempMax, unitPref) : limits.humidityMax),
+            phases: phases,
+            format: format,
+            detail: (point) => point.count > 1 ? '${format(point.low!)} a ${format(point.high!)} · ${f.plural(point.count, 'leitura')}' : '1 leitura',
+            gap: Duration(seconds: (data.bucketSeconds * 3).clamp(300, 1 << 30)),
+            height: 260,
+            semanticLabel: '${temperature ? 'Temperatura' : 'Umidade'} no período de ${range.label}',
+            emptyText: current.isDrying
+                ? 'Nenhuma leitura neste período.'
+                : 'Nenhuma leitura neste período. As leituras só são gravadas com a secagem em andamento.',
+          ),
+          PhaseLegend(
+            phases: phases,
+            describe: (phase) => '${f.dateTime(phase.start)} a ${f.dateTime(phase.end)}'
+                '${phase.min == null || phase.max == null ? '' : ' · faixa ${format(phase.min!)} a ${format(phase.max!)}'}',
+          ),
+        ],
       ),
     );
   }
@@ -297,19 +311,28 @@ class _HistoryPageState extends State<HistoryPage> {
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     child: Row(
                       children: [
-                        Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(color: context.colors.surface2, borderRadius: BorderRadius.circular(10)),
-                          child: Icon(Icons.schedule, size: 20, color: context.colors.textSecondary),
-                        ),
+                        Builder(builder: (context) {
+                          final phase = data.phaseAt(point.time);
+                          return Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: phase == null ? context.colors.surface2 : context.colors.phase(phase.key).withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(Icons.schedule, size: 20, color: context.colors.textSecondary),
+                          );
+                        }),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(f.dateTime(point.time), style: const TextStyle(fontWeight: FontWeight.w700)),
-                              Text(f.plural(point.count, 'leitura'), style: TextStyle(fontSize: 12, color: context.colors.muted)),
+                              Text(
+                                [if (data.phaseAt(point.time) != null) data.phaseAt(point.time)!.stage, f.plural(point.count, 'leitura')].join(' · '),
+                                style: TextStyle(fontSize: 12, color: context.colors.muted),
+                              ),
                             ],
                           ),
                         ),

@@ -2234,3 +2234,264 @@ textarea {
 .toast-warning .icon {
   color: var(--warn-icon);
 }
+
+/* =========================================================
+   Fases da cura: cor de cada fase no gráfico, nas etapas e na legenda
+   ========================================================= */
+
+:root {
+  --phase-amarelacao: #c99300;
+  --phase-murchamento: #d4640a;
+  --phase-secagem_folha: #3d8b40;
+  --phase-secagem_talo: #2f6db0;
+  --phase-other: #8a948a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --phase-amarelacao: #f0c541;
+    --phase-murchamento: #ff9d57;
+    --phase-secagem_folha: #7ccb7f;
+    --phase-secagem_talo: #80b1ea;
+    --phase-other: #9aa49a;
+  }
+}
+
+:root[data-theme="dark"] {
+  --phase-amarelacao: #f0c541;
+  --phase-murchamento: #ff9d57;
+  --phase-secagem_folha: #7ccb7f;
+  --phase-secagem_talo: #80b1ea;
+  --phase-other: #9aa49a;
+}
+
+.phase-amarelacao { --phase: var(--phase-amarelacao); }
+.phase-murchamento { --phase: var(--phase-murchamento); }
+.phase-secagem_folha { --phase: var(--phase-secagem_folha); }
+.phase-secagem_talo { --phase: var(--phase-secagem_talo); }
+.phase-other { --phase: var(--phase-other); }
+
+.chart-phase-bg {
+  fill: var(--phase);
+  fill-opacity: 0.09;
+}
+
+.chart-phase-bar {
+  fill: var(--phase);
+}
+
+.chart-phase-limit {
+  stroke-dasharray: 4 3;
+}
+
+.chart-phase-label {
+  fill: var(--text-2);
+  font-size: 11px;
+  font-weight: 650;
+  font-family: var(--font);
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.chart-tooltip-phase {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.chart-tooltip-phase::before,
+.phase-swatch {
+  content: "";
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--phase);
+}
+
+.phase-legend {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  font-size: 0.85rem;
+}
+
+.phase-legend li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.phase-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--phase) 16%, var(--surface));
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.phase-steps {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.phase-step {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.phase-step-bar {
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--phase) 28%, var(--surface-3));
+}
+
+.phase-step-name {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  hyphens: auto;
+}
+
+.phase-step-name .icon {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+.phase-step.is-done .phase-step-bar,
+.phase-step.is-current .phase-step-bar {
+  background: var(--phase);
+}
+
+.phase-step.is-done {
+  color: var(--text-2);
+}
+
+.phase-step.is-current {
+  color: var(--text);
+  font-weight: 750;
+}
+
+.phase-step.is-current .phase-step-bar {
+  height: 8px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--phase) 25%, transparent);
+}
+
+.phase-panel {
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  border-left: 4px solid var(--phase);
+  background: color-mix(in srgb, var(--phase) 9%, var(--surface));
+}
+
+.phase-range {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  margin: 0 0 8px;
+}
+
+.phase-range span {
+  color: var(--text-2);
+  font-size: 0.875rem;
+}
+
+.phase-overdue {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.phase-checks {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  font-size: 0.875rem;
+}
+
+.phase-checks li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--text-2);
+}
+
+.phase-checks .icon {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  color: var(--muted);
+}
+
+.phase-checks li.is-ok .icon {
+  color: var(--ok);
+}
+
+.phase-checks li.is-visual .icon {
+  color: var(--phase);
+}
+
+.details dd.is-bad {
+  color: var(--warn);
+}
+
+.phase-correct {
+  margin-top: 12px;
+}
+
+.phase-correct summary {
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-2);
+  padding: 4px 0;
+}
+
+.phase-correct .field {
+  margin-top: 8px;
+}
+
+@media (max-width: 480px) {
+  .phase-steps {
+    gap: 4px;
+  }
+
+  .phase-step {
+    font-size: 0.68rem;
+  }
+
+  /* A cor da barra já mostra a fase concluída. */
+  .phase-step-name .icon {
+    display: none;
+  }
+}

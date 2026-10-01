@@ -1,4 +1,4 @@
-// Gráfico de linha em SVG: uma série, faixa segura (limites), cursor com tooltip e teclado.
+// Gráfico de linha em SVG: uma série, faixa segura (limites), fases da cura, cursor com tooltip e teclado.
 
 import { h } from "./dom.js";
 
@@ -36,6 +36,23 @@ function nearestIndex(points, time) {
   return Math.abs(points[low].t - time) <= Math.abs(points[high].t - time) ? low : high;
 }
 
+/** Legenda das fases que aparecem no gráfico, com a cor de cada uma. */
+export function phaseLegend(phases, describe) {
+  if (!phases.length) return null;
+  return h(
+    "ul",
+    { class: "phase-legend", "aria-label": "Fases da cura no período" },
+    phases.map((phase) =>
+      h(
+        "li",
+        { class: `phase-${phase.key || "other"}` },
+        h("span", { class: "phase-swatch", "aria-hidden": "true" }),
+        h("span", {}, h("strong", {}, phase.name), describe ? h("span", { class: "small muted" }, ` · ${describe(phase)}`) : null),
+      ),
+    ),
+  );
+}
+
 /**
  * @param {object} options
  * @param {{t: Date, v: number}[]} options.points  valores já na unidade de exibição, em ordem cronológica
@@ -44,8 +61,10 @@ function nearestIndex(points, time) {
  * @param {(v: number) => string} options.format
  * @param {(p: object) => string} [options.detail]  linha extra no tooltip
  * @param {number} [options.gapMs]  intervalo sem dados a partir do qual a linha é interrompida
+ * @param {{start: Date, end: Date, key: string|null, name: string, min?: number, max?: number}[]} [options.phases]
+ *   fases da cura no período: fundo colorido e, com min/max, a faixa segura de cada uma
  */
-export function lineChart({ points, limits = null, domain = null, format, detail, gapMs = 10 * MINUTE, height = 260, label, emptyText }) {
+export function lineChart({ points, limits = null, domain = null, format, detail, gapMs = 10 * MINUTE, height = 260, label, emptyText, phases = [] }) {
   const container = h("div", { class: "chart" });
   if (!points.length) {
     container.append(h("div", { class: "chart-empty" }, emptyText || "Sem leituras neste período."));
@@ -72,6 +91,10 @@ export function lineChart({ points, limits = null, domain = null, format, detail
     const extent = [...values];
     if (limits?.min !== undefined && limits?.min !== null) extent.push(limits.min);
     if (limits?.max !== undefined && limits?.max !== null) extent.push(limits.max);
+    for (const phase of phases) {
+      if (phase.min !== undefined && phase.min !== null) extent.push(phase.min);
+      if (phase.max !== undefined && phase.max !== null) extent.push(phase.max);
+    }
     let yMin = Math.min(...extent);
     let yMax = Math.max(...extent);
     if (yMax - yMin < 2) {
@@ -116,6 +139,38 @@ export function lineChart({ points, limits = null, domain = null, format, detail
       axis.append(text);
     }
     root.append(grid);
+
+    // Fases da cura: fundo e barra no topo com a cor da fase, faixa segura de cada uma
+    const clampX = (time) => Math.min(margin.left + plotWidth, Math.max(margin.left, x(time)));
+    for (const phase of phases) {
+      const x1 = clampX(phase.start.getTime());
+      const x2 = clampX(phase.end.getTime());
+      if (x2 - x1 < 0.5) continue;
+      const group = svg("g", { class: `chart-phase phase-${phase.key || "other"}` });
+      const title = svg("title");
+      title.textContent = phase.name;
+      group.append(
+        title,
+        svg("rect", { class: "chart-phase-bg", x: x1, y: margin.top, width: x2 - x1, height: plotHeight }),
+        svg("rect", { class: "chart-phase-bar", x: x1, y: margin.top - 8, width: x2 - x1, height: 5, rx: 2 }),
+      );
+      const hasPhaseMin = phase.min !== undefined && phase.min !== null;
+      const hasPhaseMax = phase.max !== undefined && phase.max !== null;
+      if (hasPhaseMin && hasPhaseMax) {
+        const top = y(phase.max);
+        group.append(svg("rect", { class: "chart-band", x: x1, y: top, width: x2 - x1, height: Math.max(0, y(phase.min) - top) }));
+        for (const value of [phase.min, phase.max]) {
+          const py = Math.round(y(value)) + 0.5;
+          group.append(svg("line", { class: "chart-limit chart-phase-limit", x1, x2, y1: py, y2: py }));
+        }
+      }
+      if (x2 - x1 > 84) {
+        const text = svg("text", { class: "chart-phase-label", x: x1 + 6, y: margin.top + 13 });
+        text.textContent = phase.name;
+        group.append(text);
+      }
+      root.append(group);
+    }
 
     // Faixa segura entre os limites
     const hasMin = limits?.min !== undefined && limits?.min !== null;
@@ -215,9 +270,12 @@ export function lineChart({ points, limits = null, domain = null, format, detail
     geometry.focusDot.setAttribute("cy", py);
     geometry.focusDot.setAttribute("visibility", "visible");
 
+    const time = point.t.getTime();
+    const phase = phases.find((item) => item.start.getTime() <= time && time <= item.end.getTime());
     tooltip.replaceChildren(
       h("div", { class: "chart-tooltip-value" }, h("span", { class: "chart-tooltip-key", "aria-hidden": "true" }), format(point.v)),
       h("div", { class: "chart-tooltip-meta" }, new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(point.t)),
+      phase ? h("div", { class: `chart-tooltip-phase phase-${phase.key || "other"}` }, phase.name) : null,
       detail ? h("div", { class: "chart-tooltip-meta" }, detail(point)) : null,
     );
     tooltip.hidden = false;

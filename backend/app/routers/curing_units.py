@@ -21,6 +21,8 @@ from schemas.outputs import OutputsOut, OutputsUpdate
 from schemas.readings import ReadingOut, SeriesOut
 from services.device_service import device_status
 from services.output_service import describe, recent_reading, update_outputs
+from services.phases import FINISHED, NOT_STARTED, PHASES, current_phase, next_stage, phase_named
+from services.stage_service import change_stage, close_segment, open_segment, phase_status
 
 router = APIRouter()
 
@@ -35,6 +37,7 @@ def serialize_unit(unit: CuringUnit) -> dict:
     result = CuringUnitOut.model_validate(unit).model_dump()
     result["estimated_completion_at"] = _completion(unit)
     result["is_drying"] = unit.drying_started_at is not None
+    result["phase"] = phase_status(unit)
     if unit.device is not None:
         result["device_code"] = unit.device.device_code
         result["device_status"] = device_status(unit.device)
@@ -88,15 +91,34 @@ def update_curing_unit(
     unit: CuringUnit = Depends(get_owned_curing_unit),
 ):
     changes = data.model_dump(exclude_unset=True)
-    if "curing_stage" in changes and changes["curing_stage"] != unit.curing_stage:
-        unit.stage_started_at = utcnow()
+    stage = changes.pop("curing_stage", None)
     for field, value in changes.items():
-        if field in ("name", "curing_stage") and value is None:
+        if field == "name" and value is None:
             continue
         setattr(unit, field, value)
+    if stage is not None and stage != unit.curing_stage:
+        now = utcnow()
+        if stage in (NOT_STARTED, FINISHED) and unit.drying_started_at is not None:
+            _stop(db, unit, now)
+        change_stage(unit, stage, now)
+        if unit.drying_started_at is not None:
+            _refresh_outputs(db, unit)
     db.commit()
     db.refresh(unit)
     return serialize_unit(unit)
+
+
+def _refresh_outputs(db: Session, unit: CuringUnit) -> None:
+    """Reaplica o automático das saídas com a faixa da fase atual e a última leitura."""
+    reading = recent_reading(db, unit)
+    update_outputs(db, unit, reading.temperature if reading else None, reading.humidity if reading else None)
+
+
+def _stop(db: Session, unit: CuringUnit, now) -> None:
+    close_segment(unit, now)
+    unit.drying_started_at = None
+    # Saídas automáticas desligam junto com a secagem.
+    update_outputs(db, unit)
 
 
 @router.delete("/{id}")
@@ -116,11 +138,16 @@ def start_drying(
     db: Session = Depends(get_db),
     unit: CuringUnit = Depends(get_owned_curing_unit),
 ):
+    """Liga a secagem. Uma estufa nova (ou finalizada) começa na primeira fase, a Amarelação."""
+    if unit.drying_started_at is not None:
+        return serialize_unit(unit)
     now = utcnow()
     unit.drying_started_at = now
-    unit.stage_started_at = now
-    if unit.curing_stage == "Não iniciado":
-        unit.curing_stage = "Início da secagem"
+    if phase_named(unit.curing_stage) is None:
+        unit.curing_stage = PHASES[0].name
+        unit.stage_started_at = now
+    # Retomada: continua na mesma fase, com um novo trecho no histórico.
+    open_segment(unit, now)
     update_outputs(db, unit)
     db.commit()
     db.refresh(unit)
@@ -132,9 +159,29 @@ def stop_drying(
     db: Session = Depends(get_db),
     unit: CuringUnit = Depends(get_owned_curing_unit),
 ):
-    unit.drying_started_at = None
-    # Saídas automáticas desligam junto com a secagem.
-    update_outputs(db, unit)
+    _stop(db, unit, utcnow())
+    db.commit()
+    db.refresh(unit)
+    return serialize_unit(unit)
+
+
+@router.post("/{id}/advance-stage", response_model=CuringUnitOut)
+def advance_stage(
+    db: Session = Depends(get_db),
+    unit: CuringUnit = Depends(get_owned_curing_unit),
+):
+    """Passa para a próxima fase. Depois da Secagem do talo, a cura é finalizada e a secagem para."""
+    phase = current_phase(unit)
+    if phase is None:
+        raise HTTPException(status_code=409, detail="Inicie a secagem antes de avançar de fase")
+    now = utcnow()
+    stage = next_stage(phase)
+    if stage == FINISHED:
+        _stop(db, unit, now)
+        change_stage(unit, stage, now)
+    else:
+        change_stage(unit, stage, now)
+        _refresh_outputs(db, unit)
     db.commit()
     db.refresh(unit)
     return serialize_unit(unit)
@@ -239,7 +286,30 @@ def get_curing_unit_series(
         "bucket_seconds": bucket_seconds,
         "points": series,
         "stats": stats,
+        "phases": _phases_between(unit, since, until),
     }
+
+
+def _phases_between(unit: CuringUnit, since: datetime, until: datetime) -> list[dict]:
+    """Fases que aparecem no período, para colorir o fundo do gráfico."""
+    now = utcnow()
+    result = []
+    for change in unit.stage_changes:
+        end = change.ended_at or now
+        if change.started_at >= until or end <= since:
+            continue
+        phase = phase_named(change.stage)
+        result.append({
+            "stage": change.stage,
+            "key": phase.key if phase else None,
+            "started_at": max(change.started_at, since),
+            "ended_at": min(end, until),
+            "temp_min": phase.temp_min if phase else None,
+            "temp_max": phase.temp_max if phase else None,
+            "humidity_min": phase.humidity_min if phase else None,
+            "humidity_max": phase.humidity_max if phase else None,
+        })
+    return result
 
 
 def _decimal(value: float) -> str:
@@ -334,13 +404,7 @@ def update_output_modes(
             value = getattr(data, f"{output}_{field}")
             if value is not None:
                 setattr(unit, f"{output}_output_{field}", value)
-    reading = recent_reading(db, unit)
-    update_outputs(
-        db,
-        unit,
-        reading.temperature if reading else None,
-        reading.humidity if reading else None,
-    )
+    _refresh_outputs(db, unit)
     db.commit()
     db.refresh(unit)
     return describe(db, unit)
