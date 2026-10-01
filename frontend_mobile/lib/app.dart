@@ -82,7 +82,7 @@ class _TobaccoMonitorAppState extends State<TobaccoMonitorApp> {
     if (!mounted) return;
     if (found == null) {
       messengerKey.currentState?.showSnackBar(const SnackBar(
-        content: Text('Nenhum servidor encontrado na rede. Confira se o backend está ligado e se o celular está no mesmo Wi-Fi.'),
+        content: Text('Nenhum servidor na rede. Confira se o servidor está ligado e se o celular está no mesmo Wi-Fi.'),
       ));
       return;
     }

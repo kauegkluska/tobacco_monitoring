@@ -6,28 +6,19 @@ import '../core/app_scope.dart';
 import '../core/buzzer.dart';
 import '../core/models.dart';
 import '../core/prefs.dart';
-import '../core/theme.dart';
+import '../widgets/common.dart';
 import 'alerts_page.dart';
-import 'dashboard_page.dart';
-import 'history_page.dart';
-import 'profile_page.dart';
+import 'settings_page.dart';
+import 'unit_page.dart';
 import 'units_page.dart';
 
-enum AppTab { dashboard, history, alerts, units, profile }
-
-/// Pedido para a tela de estufas abrir um formulário ao ser exibida.
-class UnitsIntent {
-  const UnitsIntent({this.createUnit = false, this.linkUnitId});
-
-  final bool createUnit;
-  final int? linkUnitId;
-}
+enum AppTab { units, alerts, settings }
 
 /// Ações que as telas podem pedir para a estrutura principal.
 class ShellActions {
   const ShellActions({required this.goTo, required this.setAlertCount, required this.logout});
 
-  final void Function(AppTab tab, {UnitsIntent? intent}) goTo;
+  final void Function(AppTab tab) goTo;
   final void Function(int count) setAlertCount;
   final Future<void> Function() logout;
 }
@@ -41,11 +32,9 @@ class _Destination {
 }
 
 const _destinations = {
-  AppTab.dashboard: _Destination('Início', Icons.space_dashboard_outlined, Icons.space_dashboard),
-  AppTab.history: _Destination('Histórico', Icons.show_chart, Icons.show_chart),
-  AppTab.alerts: _Destination('Alertas', Icons.notifications_outlined, Icons.notifications),
   AppTab.units: _Destination('Estufas', Icons.warehouse_outlined, Icons.warehouse),
-  AppTab.profile: _Destination('Perfil', Icons.person_outline, Icons.person),
+  AppTab.alerts: _Destination('Alertas', Icons.notifications_outlined, Icons.notifications),
+  AppTab.settings: _Destination('Ajustes', Icons.settings_outlined, Icons.settings),
 };
 
 class HomeShell extends StatefulWidget {
@@ -61,8 +50,7 @@ class _HomeShellState extends State<HomeShell> {
   static const _badgeInterval = Duration(seconds: 30);
   static const _buzzerInterval = Duration(seconds: 5);
 
-  AppTab tab = AppTab.dashboard;
-  UnitsIntent? unitsIntent;
+  AppTab tab = AppTab.units;
   int alertCount = 0;
   Timer? badgeTimer;
   Timer? buzzerTimer;
@@ -123,7 +111,7 @@ class _HomeShellState extends State<HomeShell> {
           Expanded(child: Text('Aviso sonoro$where: ${describeOutputEvent(event, unit)}$extra')),
         ],
       ),
-      action: tab == AppTab.dashboard ? null : SnackBarAction(label: 'Ver', onPressed: () => _goTo(AppTab.dashboard)),
+      action: SnackBarAction(label: 'Ver', onPressed: () => openUnit(context, event.unitId)),
     ));
   }
 
@@ -143,21 +131,14 @@ class _HomeShellState extends State<HomeShell> {
     if (mounted && count != alertCount) setState(() => alertCount = count);
   }
 
-  void _goTo(AppTab next, {UnitsIntent? intent}) {
-    setState(() {
-      tab = next;
-      unitsIntent = intent;
-    });
-  }
+  void _goTo(AppTab next) => setState(() => tab = next);
 
   Widget _page() {
-    final key = ValueKey('${tab.name}-${unitsIntent.hashCode}');
+    final key = ValueKey(tab);
     return switch (tab) {
-      AppTab.dashboard => DashboardPage(key: key, actions: actions),
-      AppTab.history => HistoryPage(key: key, actions: actions),
+      AppTab.units => UnitsPage(key: key, actions: actions),
       AppTab.alerts => AlertsPage(key: key, actions: actions),
-      AppTab.units => UnitsPage(key: key, actions: actions, intent: unitsIntent),
-      AppTab.profile => ProfilePage(key: key, actions: actions),
+      AppTab.settings => SettingsPage(key: key, actions: actions),
     };
   }
 
@@ -176,58 +157,16 @@ class _HomeShellState extends State<HomeShell> {
 
     final appBar = AppBar(
       titleSpacing: 16,
-      title: Row(
-        children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(color: const Color(0xff2e7d32), borderRadius: BorderRadius.circular(10)),
-            child: const Icon(Icons.eco, color: Colors.white, size: 22),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'MONITOR DE ESTUFA',
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1, color: context.scheme.primary),
-                ),
-                Text(_destinations[tab]!.label, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-              ],
-            ),
-          ),
-        ],
-      ),
+      title: Text(_destinations[tab]!.label, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
       actions: [
         ValueListenableBuilder<bool>(
           valueListenable: api.online,
-          builder: (context, online, _) => Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: Tooltip(
-              message: online ? 'Servidor conectado' : 'Sem conexão com o servidor',
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: online ? context.colors.surface2 : context.colors.critContainer,
-                  borderRadius: BorderRadius.circular(999),
+          builder: (context, online, _) => online
+              ? const SizedBox.shrink()
+              : const Padding(
+                  padding: EdgeInsets.only(right: 12),
+                  child: StatusBadge(kind: StatusKind.crit, label: 'Sem conexão', icon: Icons.cloud_off),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(online ? Icons.circle : Icons.cloud_off, size: online ? 9 : 16, color: online ? context.colors.ok : context.colors.crit),
-                    if (!online || wide) ...[
-                      const SizedBox(width: 6),
-                      Text(
-                        online ? 'Conectado' : 'Sem conexão',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: online ? context.colors.textSecondary : context.colors.onCritContainer),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-          ),
         ),
       ],
     );

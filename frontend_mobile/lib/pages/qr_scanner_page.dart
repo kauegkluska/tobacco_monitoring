@@ -83,7 +83,7 @@ class _QrScannerPageState extends State<QrScannerPage> {
               child: Padding(
                 padding: EdgeInsets.all(24),
                 child: Text(
-                  'Não foi possível abrir a câmera. Verifique a permissão do app nas configurações do celular ou digite o ID manualmente.',
+                  'Não foi possível abrir a câmera. Libere a permissão nas configurações ou digite o ID.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.white),
                 ),
@@ -102,7 +102,7 @@ class _QrScannerPageState extends State<QrScannerPage> {
             right: 24,
             bottom: 40,
             child: Text(
-              'Aponte a câmera para o QR code do sender. O ID do controlador é preenchido automaticamente.',
+              'Aponte para o QR code do sensor.',
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.white, fontSize: 15),
             ),

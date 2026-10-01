@@ -11,10 +11,15 @@ import 'package:monitor_ambiental/core/format.dart' as f;
 import 'package:monitor_ambiental/core/models.dart';
 import 'package:monitor_ambiental/core/prefs.dart';
 import 'package:monitor_ambiental/core/theme.dart';
+import 'package:monitor_ambiental/widgets/common.dart';
 import 'package:monitor_ambiental/pages/login_page.dart';
 import 'package:monitor_ambiental/pages/qr_scanner_page.dart';
+import 'package:monitor_ambiental/pages/shell.dart';
+import 'package:monitor_ambiental/pages/unit_page.dart';
+import 'package:monitor_ambiental/pages/units_page.dart';
 import 'package:monitor_ambiental/widgets/line_chart.dart';
 import 'package:monitor_ambiental/widgets/server_dialog.dart';
+import 'package:monitor_ambiental/widgets/unit_widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 Widget _wrap(Widget child, {ApiClient? api}) {
@@ -33,7 +38,7 @@ void main() {
       expect(f.number(98.64), '98,6');
       expect(f.temp(37, TempUnit.fahrenheit), '98,6 °F');
       expect(f.temp(37, TempUnit.celsius), '37,0 °C');
-      expect(f.tempWithOther(37, TempUnit.fahrenheit), '98,6 °F (37,0 °C)');
+      expect(f.tempRange(35, 40, TempUnit.celsius), '35 a 40 °C');
       expect(f.integer(1234567), '1.234.567');
     });
 
@@ -102,7 +107,7 @@ void main() {
   testWidgets('tela de login', (tester) async {
     await tester.pumpWidget(_wrap(LoginPage(onAuthenticated: () {})));
 
-    expect(find.text('Entrar na plataforma'), findsOneWidget);
+    expect(find.text('Entrar'), findsNWidgets(3));
     expect(find.text('Criar conta'), findsOneWidget);
     expect(find.text('Esqueci minha senha'), findsOneWidget);
 
@@ -267,5 +272,132 @@ void main() {
 
     expect(saved, 'http://192.168.0.14:8000');
     expect(api.hasSavedBaseUrl, isTrue);
+  });
+
+  group('situação da estufa', () {
+    final drying = {
+      'id': 1,
+      'name': 'Estufa 01',
+      'curing_stage': 'Amarelação',
+      'device_id': 3,
+      'stage_started_at': '2026-09-30T10:00:00Z',
+      'drying_started_at': '2026-09-30T10:00:00Z',
+      'phase': {
+        'key': 'amarelacao', 'name': 'Amarelação', 'number': 1, 'total': 4,
+        'temp_min': 35, 'temp_max': 40, 'humidity_min': 80, 'humidity_max': 95,
+        'min_hours': 24, 'max_hours': 48, 'hours': 2, 'overdue': false, 'next_stage': 'Murchamento', 'ready': false,
+        'checks': [
+          {'label': 'Temperatura em 38 °C ou mais', 'ok': false, 'metric': 'temperature', 'target': 38},
+        ],
+        'visual_check': 'Folhas amarelas.',
+      },
+    };
+    Device device({bool online = true}) => Device.fromJson({'id': 3, 'device_code': 'ESP32-TOBACCO-01', 'status': online ? 'online' : 'offline'});
+    Reading reading(double temperature, double humidity) =>
+        Reading.fromJson({'temperature': temperature, 'humidity': humidity, 'timestamp': DateTime.now().toUtc().toIso8601String()});
+
+    test('da mais urgente para a mais tranquila', () {
+      final unit = CuringUnit.fromJson(drying);
+      String label(Device? d, Reading? r, {int active = 0, int critical = 0}) =>
+          unitStatus(unit: unit, device: d, latest: r, activeAlerts: active, criticalAlerts: critical).label;
+
+      expect(label(null, null), 'Sem sensor');
+      expect(label(device(online: false), reading(37, 85), active: 1, critical: 1), 'Crítico');
+      expect(label(device(online: false), reading(37, 85)), 'Sem sinal');
+      expect(label(device(), reading(37, 85), active: 1), 'Atenção');
+      expect(label(device(), reading(41, 85)), 'Fora da faixa');
+      expect(label(device(), reading(37, 85)), 'Normal');
+      final stopped = CuringUnit.fromJson({...drying, 'drying_started_at': null, 'phase': null});
+      expect(unitStatus(unit: stopped, device: device(), latest: null, activeAlerts: 0, criticalAlerts: 0).label, 'Parada');
+    });
+
+    test('alvo de temperatura segue a unidade escolhida', () {
+      final check = CuringUnit.fromJson(drying).phase!.checks.single;
+      expect(phaseCheckLabel(check, TempUnit.celsius), 'Temperatura em 38 °C ou mais');
+      expect(phaseCheckLabel(check, TempUnit.fahrenheit), 'Temperatura em 100 °F ou mais');
+    });
+
+    testWidgets('lista mostra temperatura, umidade e alertas de cada estufa', (tester) async {
+      final api = ApiClient(
+        client: MockClient((request) async {
+          final body = switch (request.url.path) {
+            '/curing_units/' => [
+                {
+                  ...drying,
+                  'latest': {'id': 9, 'temperature': 41.0, 'humidity': 85.0, 'timestamp': DateTime.now().toUtc().toIso8601String(), 'curing_unit_id': 1},
+                  'active_alerts': 2,
+                  'critical_alerts': 1,
+                },
+              ],
+            '/devices/' => [
+                {'id': 3, 'device_code': 'ESP32-TOBACCO-01', 'status': 'online', 'curing_unit_id': 1},
+              ],
+            _ => <dynamic>[],
+          };
+          return http.Response.bytes(utf8.encode(jsonEncode(body)), 200, headers: {'content-type': 'application/json; charset=utf-8'});
+        }),
+      );
+      var alertCount = 0;
+      final actions = ShellActions(goTo: (_) {}, setAlertCount: (count) => alertCount = count, logout: () async {});
+      await tester.pumpWidget(_wrap(Scaffold(body: UnitsPage(actions: actions)), api: api));
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('Estufa 01'), findsOneWidget);
+      expect(find.byWidgetPredicate((widget) => widget is StatusBadge && widget.label == 'Crítico'), findsOneWidget);
+      expect(find.text('105,8'), findsOneWidget);
+      expect(find.text('85,0'), findsOneWidget);
+      expect(find.text('Esperado 95 a 104 °F'), findsOneWidget);
+      expect(find.textContaining('2 alertas ativos'), findsOneWidget);
+      expect(alertCount, 2);
+    });
+
+    testWidgets('tela da estufa cabe num celular de 360 dp', (tester) async {
+      tester.view.physicalSize = const Size(360, 780);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final now = DateTime.now().toUtc();
+      final output = {'relay': 1, 'pin': 'GPIO2', 'mode': 'auto', 'trigger': 'humidity_out', 'on': false, 'reason': 'Liga quando a umidade sair da faixa esperada.', 'in_sync': false};
+      final api = ApiClient(
+        client: MockClient((request) async {
+          final path = request.url.path;
+          final Object body = switch (path) {
+            '/curing_units/1' => drying,
+            '/devices/' => [
+                {'id': 3, 'device_code': 'ESP32-TOBACCO-01', 'status': 'online', 'rssi': -80, 'snr': 7.5, 'firmware_version': '1.2.0', 'curing_unit_id': 1, 'last_seen_at': now.toIso8601String()},
+              ],
+            '/curing_units/1/latest' => {'id': 9, 'temperature': 41.2, 'humidity': 88.0, 'timestamp': now.toIso8601String(), 'curing_unit_id': 1},
+            '/curing_units/1/alerts' => [
+                {'id': 4, 'type': 'Temperatura alta', 'severity': 'warning', 'is_active': true, 'message': 'Temperatura acima do limite na fase de Amarelação.', 'value': 41.2, 'threshold': 40, 'timestamp': now.toIso8601String(), 'curing_unit_id': 1},
+              ],
+            '/curing_units/1/outputs' => {
+                'curing_unit_id': 1, 'is_drying': true, 'confirmed_at': null,
+                'humidity': {...output, 'name': 'Ventoinhas'},
+                'temperature': {...output, 'name': 'Queimador', 'relay': 2, 'pin': 'GPIO3', 'trigger': 'temperature_out'},
+                'last_buzzer': null, 'events': [],
+              },
+            '/curing_units/1/series' => {
+                'since': now.subtract(const Duration(hours: 6)).toIso8601String(), 'until': now.toIso8601String(), 'bucket_seconds': 120,
+                'points': [], 'stats': {'count': 0}, 'phases': [],
+              },
+            _ => <dynamic>[],
+          };
+          return http.Response.bytes(utf8.encode(jsonEncode(body)), 200, headers: {'content-type': 'application/json; charset=utf-8'});
+        }),
+      );
+      await tester.pumpWidget(_wrap(const UnitPage(unitId: 1), api: api));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('Estufa 01'), findsOneWidget);
+      expect(find.text('Esperado 95 a 104 °F'), findsOneWidget);
+      expect(find.text('Temperatura alta'), findsOneWidget);
+      expect(find.text('Avançar fase'), findsOneWidget);
+      await tester.scrollUntilVisible(find.text('Desvincular'), 300);
+      expect(find.text('Ventoinhas'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
   });
 }

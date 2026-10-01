@@ -4,13 +4,12 @@ App para celular e tablet com as mesmas telas do painel web:
 
 | Tela | O que mostra |
 |---|---|
-| **Início** | Situação da estufa em linguagem simples, temperatura e umidade com a faixa segura, **saídas e aviso sonoro** (relés do sender com nome editável, como "Ventoinhas"; modo automático/ligada/desligada; regra do automático; confirmação do sender; último aviso e últimas mudanças), controle da secagem, gráfico das últimas 6 h e alertas ativos. Mostra os primeiros passos enquanto a configuração não está completa. |
-| **Histórico** | Períodos de 1 h a 30 dias, temperatura ou umidade, mínima/média/máxima, gráfico (toque ou arraste para ver os valores) e registros. |
-| **Alertas** | Ativos, resolvidos e todos, com valor esperado e encontrado. Permite reconhecer e resolver. |
-| **Estufas** | Cadastro de estufas e vínculo do sensor ESP32 lendo o QR code com a câmera ou digitando o ID do controlador. Também edita limites e desvincula. |
-| **Perfil** | Nome, senha, unidade (°F/°C), tema (claro/escuro/automático), aviso sonoro no celular (liga/desliga e teste), notificações com o app fechado, endereço do servidor e uma explicação de como o sistema funciona. |
+| **Estufas** | Um cartão por estufa: situação (Normal, Fora da faixa, Atenção, Crítico, Sem sinal, Parada), fase, temperatura e umidade com a faixa esperada, alertas ativos. Toque para abrir. |
+| **Estufa** | Tudo da estufa numa tela: leituras, alertas ativos, cura (fases, condições para avançar, iniciar/parar), histórico (período, temperatura/umidade, mín/méd/máx), saídas e sensor (vincular pelo QR code, verificar, desvincular). No menu ⋮: renomear, duração prevista, corrigir fase e excluir. |
+| **Alertas** | Ativos, resolvidos e todos, com filtro por estufa e gravidade. Permite reconhecer e resolver. |
+| **Ajustes** | Unidade (°F/°C), tema, aviso sonoro no celular, notificações com o app fechado, conta, senha, servidor e legenda das situações. |
 
-Quando o gateway toca o aviso sonoro (uma saída ligou), o app mostra um aviso na tela e, se ativado no Perfil, bipa e vibra o celular.
+Quando o gateway toca o aviso sonoro (uma saída ligou), o app mostra um aviso na tela e, se ativado em Ajustes, bipa e vibra o celular.
 
 ## Notificações com o app fechado (Android)
 
@@ -92,7 +91,7 @@ lib/
   core/api.dart           cliente da API: token, renovação e mensagens de erro
   core/models.dart        modelos tipados (estufa, dispositivo, leitura, alerta, série)
   core/format.dart        números, datas e conversão °C/°F
-  core/prefs.dart         preferências do aparelho (unidade, tema, estufa)
+  core/prefs.dart         preferências do aparelho (unidade, tema, avisos)
   core/theme.dart         cores do DESIGN.md para tema claro e escuro
   core/app_scope.dart     acesso à API e às preferências em qualquer tela
   core/buzzer.dart        aviso sonoro no celular (assets/sounds/buzzer.wav) e textos das saídas
@@ -100,7 +99,10 @@ lib/
   core/discovery.dart     busca do servidor na rede (mDNS e varredura)
   widgets/server_dialog.dart  escolha do servidor: busca na rede ou endereço manual
   widgets/common.dart     selos, avisos, cartões, estados vazios e formulários
-  widgets/line_chart.dart gráfico com faixa segura e seleção por toque
+  widgets/line_chart.dart gráfico com faixa esperada e seleção por toque
+  widgets/unit_widgets.dart  situação da estufa e leitura grande com a faixa esperada
+  widgets/alert_card.dart  cartão de alerta com reconhecer e resolver
+  widgets/unit_forms.dart  cadastro de estufa, duração e vínculo do sensor
   pages/                  uma tela por arquivo
 test/widget_test.dart
 ```

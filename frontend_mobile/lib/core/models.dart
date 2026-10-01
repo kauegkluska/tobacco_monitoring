@@ -26,10 +26,16 @@ String? phaseKeyOf(String stage) {
 class PhaseCheck {
   PhaseCheck.fromJson(Map<String, dynamic> json)
       : label = json['label']?.toString() ?? '',
-        ok = json['ok'] == true;
+        ok = json['ok'] == true,
+        metric = json['metric']?.toString(),
+        target = _double(json['target']);
 
   final String label;
   final bool ok;
+
+  /// "temperature" (alvo em °C) ou "humidity"; nulo nas condições de tempo.
+  final String? metric;
+  final double? target;
 }
 
 /// Fase em andamento (só com a secagem ligada): faixa de referência e o que falta para avançar.
@@ -83,7 +89,10 @@ class CuringUnit {
         estimatedCompletion = _date(json['estimated_completion_at']),
         deviceCode = json['device_code']?.toString(),
         deviceStatus = json['device_status']?.toString(),
-        phase = json['phase'] == null ? null : PhaseStatus.fromJson(json['phase'] as Map<String, dynamic>);
+        phase = json['phase'] == null ? null : PhaseStatus.fromJson(json['phase'] as Map<String, dynamic>),
+        latest = json['latest'] == null ? null : Reading.fromJson(json['latest'] as Map<String, dynamic>),
+        activeAlerts = _int(json['active_alerts']) ?? 0,
+        criticalAlerts = _int(json['critical_alerts']) ?? 0;
 
   final int id;
   final String name;
@@ -97,9 +106,14 @@ class CuringUnit {
   final String? deviceStatus;
   final PhaseStatus? phase;
 
+  /// Só na listagem de estufas: última leitura gravada e alertas ativos.
+  final Reading? latest;
+  final int activeAlerts;
+  final int criticalAlerts;
+
   bool get isFinished => stage == finishedStage;
 
-  /// Faixa segura: a da fase em andamento; sem secagem, os limites do dispositivo.
+  /// Faixa esperada: a da fase em andamento; sem secagem, os limites do dispositivo.
   Limits limitsWith(Device? device) => phase?.limits ?? device?.limits ?? Limits.defaults;
 
   bool get isDrying => dryingStartedAt != null;
@@ -176,6 +190,9 @@ class Reading {
   final DateTime timestamp;
 }
 
+/// Gravidades da API, da mais leve para a mais grave.
+const severityLabels = {'info': 'Informativo', 'warning': 'Atenção', 'critical': 'Crítico', 'emergency': 'Emergência'};
+
 class AlertItem {
   AlertItem.fromJson(Map<String, dynamic> json)
       : id = json['id'] as int,
@@ -207,7 +224,7 @@ class AlertItem {
   /// Crítico ou emergência: pede ação imediata.
   bool get isCritical => severity == 'critical' || severity == 'emergency';
   bool get isEmergency => severity == 'emergency';
-  String get severityLabel => isEmergency ? 'Emergência' : (isCritical ? 'Crítico' : 'Atenção');
+  String get severityLabel => severityLabels[severity] ?? 'Atenção';
   bool get isTemperature => type.startsWith('Temperatura');
   bool get isHigh => type.endsWith('alta');
 }
@@ -323,10 +340,10 @@ String? rangeState(double? value, double min, double max) {
 
 /// Regras do modo automático das saídas (mesmos códigos da API).
 const outputTriggers = {
-  'humidity_out': 'Umidade fora da faixa segura',
+  'humidity_out': 'Umidade fora da faixa esperada',
   'humidity_high': 'Umidade acima do máximo',
   'humidity_low': 'Umidade abaixo do mínimo',
-  'temperature_out': 'Temperatura fora da faixa segura',
+  'temperature_out': 'Temperatura fora da faixa esperada',
   'temperature_high': 'Temperatura acima do máximo',
   'temperature_low': 'Temperatura abaixo do mínimo',
 };

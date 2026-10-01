@@ -3,11 +3,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 enum TempUnit { fahrenheit, celsius }
 
-/// Preferências deste aparelho: unidade de temperatura, tema, estufa selecionada e aviso sonoro.
+/// Preferências deste aparelho: unidade de temperatura, tema e avisos.
 class AppPrefs extends ChangeNotifier {
   TempUnit unit = TempUnit.fahrenheit;
   ThemeMode themeMode = ThemeMode.system;
-  int? unitId;
 
   /// Toca e vibra o celular quando o gateway aciona o aviso sonoro (uma saída ligou).
   bool phoneBuzzer = true;
@@ -23,7 +22,6 @@ class AppPrefs extends ChangeNotifier {
       'dark' => ThemeMode.dark,
       _ => ThemeMode.system,
     };
-    unitId = storage.getInt('pref_unit_id');
     phoneBuzzer = storage.getBool('pref_phone_buzzer') ?? true;
     backgroundAlerts = storage.getBool('pref_background_alerts') ?? false;
   }
@@ -40,18 +38,6 @@ class AppPrefs extends ChangeNotifier {
     notifyListeners();
     final storage = await SharedPreferences.getInstance();
     await storage.setString('pref_theme', value.name);
-  }
-
-  Future<void> setUnitId(int? value) async {
-    if (unitId == value) return;
-    unitId = value;
-    notifyListeners();
-    final storage = await SharedPreferences.getInstance();
-    if (value == null) {
-      await storage.remove('pref_unit_id');
-    } else {
-      await storage.setInt('pref_unit_id', value);
-    }
   }
 
   Future<void> setPhoneBuzzer(bool value) async {
