@@ -16,7 +16,7 @@ class OutputEvent(Base):
     # "humidity" ou "temperature".
     output = Column(String(20), nullable=False)
     turned_on = Column(Boolean, nullable=False)
-    # "auto" (regra da faixa segura) ou "manual" (alterado no app).
+    # "auto" (regra da faixa esperada) ou "manual" (alterado no app).
     cause = Column(String(10), nullable=False)
     # Leitura que provocou a mudança automática, quando houver: "temperature" (°C) ou "humidity" (%).
     metric = Column(String(20), nullable=True)

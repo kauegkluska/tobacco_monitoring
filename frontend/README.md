@@ -19,24 +19,24 @@ Para servir a pasta separadamente (por exemplo, durante o desenvolvimento), use 
 
 | Tela | O que mostra |
 |---|---|
-| **Início** | Situação da estufa em linguagem simples, temperatura e umidade com a faixa segura, controle da secagem (fase, duração prevista, iniciar/parar), gráfico das últimas 6 h e alertas ativos. Mostra os primeiros passos enquanto a configuração não está completa. |
-| **Histórico** | Períodos de 1 h a 30 dias, temperatura ou umidade, mínima/média/máxima, gráfico com tooltip, tabela e exportação CSV. |
-| **Alertas** | Ativos, resolvidos e todos, com valor esperado e encontrado. Permite reconhecer e resolver. |
-| **Estufas** | Cadastro de estufas, vínculo do sensor ESP32 pelo ID do controlador, limites de temperatura e umidade e desvínculo. |
-| **Perfil** | Nome, senha, unidade (°F/°C), tema (claro/escuro/automático), endereço do servidor e uma explicação de como o sistema funciona. |
+| **Estufas** (`#/estufas`) | Um cartão por estufa: situação (Normal, Fora da faixa, Atenção, Crítico, Sem sinal, Parada), fase, temperatura e umidade com a faixa esperada, alertas ativos. |
+| **Estufa** (`#/estufa/<id>`) | Tudo da estufa: leituras, alertas ativos, cura (fases, condições para avançar, iniciar/parar), histórico (período, temperatura/umidade, mín/méd/máx, CSV), saídas e sensor (vincular, verificar, desvincular). Em **Opções**: renomear, duração prevista, corrigir fase e excluir. |
+| **Alertas** (`#/alertas`) | Ativos, resolvidos e todos, com filtro por estufa e gravidade. Permite reconhecer e resolver. |
+| **Ajustes** (`#/ajustes`) | Unidade (°F/°C), tema, aviso sonoro, conta, senha, servidor e legenda das situações. |
 
 ## Estrutura
 
 ```
 index.html
 css/styles.css      tokens do design (claro e escuro) e componentes
-js/main.js          sessão, menu e navegação (#/inicio, #/historico...)
+js/main.js          sessão, menu e navegação (#/estufas, #/estufa/3...)
 js/api.js           cliente da API: token, renovação, mensagens de erro
-js/chart.js         gráfico em SVG com faixa segura e tooltip
+js/chart.js         gráfico em SVG com faixa esperada e tooltip
 js/dom.js           ícones, diálogos, avisos e utilitários de interface
 js/format.js        números, datas e conversão °C/°F em português
 js/store.js         preferências deste navegador
 js/data.js          dados compartilhados e regras de apresentação
+js/widgets.js       situação da estufa, leituras e alertas (usados em várias telas)
 js/pages/*.js       uma tela por arquivo
 ```
 

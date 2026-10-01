@@ -101,7 +101,7 @@ void main() {
     expect(outputs.lastBuzzer!.unitName, 'Estufa 01');
     expect(describeOutputEvent(outputs.lastBuzzer!, TempUnit.celsius), 'Saída de umidade ligou (automático, 95,0%)');
     expect(describeOutputEvent(outputs.events.first, TempUnit.fahrenheit), 'Ventoinhas ligou (automático, 176,0 °F)');
-    expect(describeOutputEvent(outputs.events.last, TempUnit.celsius), 'Saída de temperatura desligou (secagem parada)');
+    expect(describeOutputEvent(outputs.events.last, TempUnit.celsius), 'Ventoinha desligou (secagem parada)');
   });
 
   testWidgets('tela de login', (tester) async {
@@ -373,7 +373,8 @@ void main() {
             '/curing_units/1/outputs' => {
                 'curing_unit_id': 1, 'is_drying': true, 'confirmed_at': null,
                 'humidity': {...output, 'name': 'Ventoinhas'},
-                'temperature': {...output, 'name': 'Queimador', 'relay': 2, 'pin': 'GPIO3', 'trigger': 'temperature_out'},
+                'target_temperature': 38,
+                'temperature': {...output, 'name': 'Ventoinha', 'relay': 2, 'pin': 'GPIO3', 'trigger': 'temperature_target'},
                 'last_buzzer': null, 'events': [],
               },
             '/curing_units/1/series' => {
@@ -395,9 +396,73 @@ void main() {
       expect(find.text('Esperado 95 a 104 °F'), findsOneWidget);
       expect(find.text('Temperatura alta'), findsOneWidget);
       expect(find.text('Avançar fase'), findsOneWidget);
+      // A ventoinha segue o alvo: aparece na temperatura e nas saídas.
+      expect(find.text('Alvo 100,4 °F'), findsOneWidget);
       await tester.scrollUntilVisible(find.text('Desvincular'), 300);
       expect(find.text('Ventoinhas'), findsOneWidget);
+      expect(find.text('Alvo  100,4 °F', findRichText: true), findsOneWidget);
+      expect(find.text('Alterar'), findsOneWidget);
       expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('secagem parada no meio pergunta se continua ou começa outra estufada', (tester) async {
+      tester.view.physicalSize = const Size(400, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final now = DateTime.now().toUtc();
+      final paused = {
+        ...drying,
+        'curing_stage': 'Murchamento',
+        'drying_started_at': null,
+        'phase': null,
+        'stage_hours': 16.95,
+        'cycle_hours': 40.0,
+        'interrupted': true,
+        'paused_at': now.subtract(const Duration(hours: 2)).toIso8601String(),
+      };
+      final posts = <String>[];
+      final api = ApiClient(
+        client: MockClient((request) async {
+          if (request.method == 'POST') posts.add(request.url.toString());
+          final Object body = switch (request.url.path) {
+            '/curing_units/1' || '/curing_units/1/start-drying' => paused,
+            '/devices/' => [
+                {'id': 3, 'device_code': 'ESP32-TOBACCO-01', 'status': 'online', 'curing_unit_id': 1},
+              ],
+            '/curing_units/1/latest' => <String, dynamic>{},
+            '/curing_units/1/outputs' => {
+                'curing_unit_id': 1, 'is_drying': false,
+                'humidity': {'name': 'Flap', 'relay': 1, 'mode': 'auto', 'trigger': 'humidity_out', 'on': false, 'reason': ''},
+                'temperature': {'name': 'Ventoinha', 'relay': 2, 'mode': 'auto', 'trigger': 'temperature_target', 'on': false, 'reason': ''},
+                'events': [],
+              },
+            '/curing_units/1/series' => {
+                'since': now.subtract(const Duration(hours: 6)).toIso8601String(), 'until': now.toIso8601String(), 'bucket_seconds': 120,
+                'points': [], 'stats': {'count': 0}, 'phases': [],
+              },
+            _ => <dynamic>[],
+          };
+          if (request.url.path == '/curing_units/1/latest') return http.Response('', 404);
+          return http.Response.bytes(utf8.encode(jsonEncode(body)), 200, headers: {'content-type': 'application/json; charset=utf-8'});
+        }),
+      );
+      await tester.pumpWidget(_wrap(const UnitPage(unitId: 1), api: api));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.textContaining('Parada em Murchamento'), findsOneWidget);
+      expect(find.text('16 h 57 min'), findsOneWidget);
+      await tester.scrollUntilVisible(find.text('Iniciar secagem'), 200);
+      await tester.tap(find.text('Iniciar secagem'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('Continuar a secagem?'), findsOneWidget);
+
+      await tester.tap(find.text('Nova estufada'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(posts.single, endsWith('/curing_units/1/start-drying?new_batch=true'));
     });
   });
 }

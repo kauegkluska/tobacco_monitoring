@@ -29,8 +29,9 @@ def test_outputs_start_off_and_are_read_by_the_firmware(client, auth, drying_uni
 
 
 def test_auto_mode_turns_on_outside_the_safe_range_with_hysteresis(client, auth, drying_unit):
-    # Amarelação: 35–40 °C e 80–95%.
+    # Amarelação: 35–40 °C e 80–95%. A ventoinha passa a seguir a faixa em vez da temperatura alvo.
     unit_id = drying_unit["unit"]["id"]
+    client.patch(f"/curing_units/{unit_id}/outputs", json={"temperature_trigger": "temperature_out"}, headers=auth)
     assert commands(send_reading(client, 38.0, 97.0)) == (True, False)
     # 94,5% ainda está na margem de 1 ponto: a saída continua ligada.
     assert commands(send_reading(client, 38.0, 94.5)) == (True, False)
@@ -40,8 +41,8 @@ def test_auto_mode_turns_on_outside_the_safe_range_with_hysteresis(client, auth,
     outputs = client.get(f"/curing_units/{unit_id}/outputs", headers=auth).json()
     temperature = outputs["temperature"]
     assert (temperature["mode"], temperature["on"], temperature["trigger"]) == ("auto", True, "temperature_out")
-    assert temperature["reason"] == "Automático: ligada porque a temperatura saiu da faixa segura."
-    assert (temperature["name"], temperature["relay"], temperature["pin"]) == ("Saída de temperatura", 2, "GPIO3")
+    assert temperature["reason"] == "Ligada: a temperatura saiu da faixa esperada."
+    assert (temperature["name"], temperature["relay"], temperature["pin"]) == ("Ventoinha", 2, "GPIO3")
     events = outputs["events"]
     assert [(e["output"], e["turned_on"], e["cause"]) for e in events] == [
         ("temperature", True, "auto"),
@@ -80,6 +81,7 @@ def test_invalid_mode_is_rejected(client, auth, drying_unit):
 
 def test_stopping_the_drying_turns_auto_outputs_off(client, auth, drying_unit):
     unit_id = drying_unit["unit"]["id"]
+    client.patch(f"/curing_units/{unit_id}/outputs", json={"target_temperature": 38}, headers=auth)
     assert commands(send_reading(client, 20.0, 85.0)) == (False, True)
 
     client.post(f"/curing_units/{unit_id}/stop-drying", headers=auth)
@@ -96,12 +98,13 @@ def test_unknown_device_gets_outputs_off(client):
 
 
 def test_output_events_feed_is_private_and_incremental(client, auth, drying_unit):
+    client.patch(f"/curing_units/{drying_unit['unit']['id']}/outputs", json={"target_temperature": 36}, headers=auth)
     send_reading(client, 38.0, 97.0)
     first = client.get("/output-events/?limit=1", headers=auth).json()
     assert len(first) == 1 and first[0]["curing_unit_name"] == "Estufa 01"
 
     assert client.get(f"/output-events/?after_id={first[0]['id']}", headers=auth).json() == []
-    send_reading(client, 45.0, 97.0)
+    send_reading(client, 35.0, 97.0)
     newer = client.get(f"/output-events/?after_id={first[0]['id']}&buzzer=true", headers=auth).json()
     assert [(e["output"], e["buzzer"]) for e in newer] == [("temperature", True)]
 
@@ -127,12 +130,13 @@ def test_output_can_be_renamed_and_follow_another_rule(client, auth, drying_unit
     assert changed.status_code == 200
     fans = changed.json()["humidity"]
     assert fans["name"] == "Ventoinhas do forno"
-    assert fans["reason"] == "Automático: liga quando a temperatura passar do máximo."
+    assert fans["reason"] == "Liga quando a temperatura passar do máximo."
 
     # Temperatura baixa não liga as ventoinhas (só acima do máximo da Amarelação, 40 °C).
-    assert commands(send_reading(client, 20.0, 85.0)) == (False, True)
-    assert commands(send_reading(client, 45.0, 85.0)) == (True, True)
-    assert commands(send_reading(client, 39.8, 85.0)) == (True, True)  # dentro da margem de 0,5 °C
+    # A ventoinha do relé 2 fica desligada: ainda não há temperatura alvo.
+    assert commands(send_reading(client, 20.0, 85.0)) == (False, False)
+    assert commands(send_reading(client, 45.0, 85.0)) == (True, False)
+    assert commands(send_reading(client, 39.8, 85.0)) == (True, False)  # dentro da margem de 0,5 °C
     assert commands(send_reading(client, 39.0, 85.0)) == (False, False)
 
     events = client.get(f"/curing_units/{unit_id}/outputs", headers=auth).json()["events"]
@@ -163,3 +167,28 @@ def test_sender_confirms_the_relay_state(client, auth, drying_unit):
     client.patch(f"/curing_units/{unit_id}/outputs", json={"humidity_mode": "off"}, headers=auth)
     outputs = client.get(f"/curing_units/{unit_id}/outputs", headers=auth).json()
     assert outputs["humidity"]["in_sync"] is False  # aguardando o sender aplicar
+
+
+def test_fan_keeps_the_target_temperature(client, auth, drying_unit):
+    unit_id = drying_unit["unit"]["id"]
+    url = f"/curing_units/{unit_id}/outputs"
+    outputs = client.get(url, headers=auth).json()
+    assert (outputs["humidity"]["name"], outputs["temperature"]["name"]) == ("Flap", "Ventoinha")
+    assert outputs["temperature"]["trigger"] == "temperature_target"
+    assert outputs["target_temperature"] is None
+    assert outputs["temperature"]["reason"] == "Desligada: defina a temperatura alvo."
+    # Sem alvo, a ventoinha não liga nem com a estufa fria.
+    assert commands(send_reading(client, 30.0, 85.0)) == (False, False)
+
+    changed = client.patch(url, json={"target_temperature": 38}, headers=auth).json()
+    assert changed["target_temperature"] == 38
+    # A última leitura (30 °C) já está abaixo do alvo: liga sem esperar a próxima.
+    assert changed["temperature"]["on"] is True
+    assert changed["temperature"]["reason"] == "Ligada: a temperatura está abaixo do alvo."
+    assert commands(send_reading(client, 37.9, 85.0)) == (False, True)  # segue até atingir o alvo
+    assert commands(send_reading(client, 38.0, 85.0)) == (False, False)  # atingiu: desliga
+    assert commands(send_reading(client, 37.7, 85.0)) == (False, False)  # dentro da margem de 0,5 °C
+    assert commands(send_reading(client, 37.4, 85.0)) == (False, True)
+
+    assert client.get(f"/curing_units/{unit_id}", headers=auth).json()["target_temperature"] == 38
+    assert client.patch(url, json={"target_temperature": 95}, headers=auth).status_code == 422

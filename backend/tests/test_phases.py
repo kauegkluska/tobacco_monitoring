@@ -1,8 +1,9 @@
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from conftest import add_past_readings, send_reading, set_stage, shift_stage_start
 from core.clock import utcnow
 from core.database import SessionLocal
+from models.curing_unit import CuringUnit
 from services.alert_engine import check_missing_readings
 
 
@@ -68,6 +69,9 @@ def test_finishing_by_hand_stops_the_drying(client, auth, drying_unit):
 
 def test_outputs_follow_the_new_phase_range(client, auth, drying_unit):
     # 45 °C está acima da Amarelação (35–40), mas dentro do Murchamento (40–48).
+    client.patch(
+        f"/curing_units/{drying_unit['unit']['id']}/outputs", json={"temperature_trigger": "temperature_out"}, headers=auth,
+    )
     response = send_reading(client, 45.0, 85.0)
     assert response.json()["rele_temperatura"] is True
     set_stage(client, auth, drying_unit["unit"]["id"], "Murchamento")
@@ -117,6 +121,8 @@ def test_fast_heating_is_reported_in_wilting(client, auth, drying_unit):
     alert = active_alerts(client, auth)["Aquecimento rápido"]
     assert alert["severity"] == "warning"
     assert alert["value"] is None
+    # Mensagem em °F, como o resto da interface (limite de 1,5 °C/h = 2,7 °F/h).
+    assert alert["message"].endswith("Máximo: 2,7 °F/h.")
 
     # Na Secagem do talo não há limite de aquecimento: o alerta fecha.
     set_stage(client, auth, unit_id, "Secagem do talo")
@@ -173,3 +179,64 @@ def test_ready_to_advance_after_time_and_conditions(client, auth, drying_unit):
     phase = client.get(f"/curing_units/{unit_id}", headers=auth).json()["phase"]
     assert all(check["ok"] for check in phase["checks"]), phase["checks"]
     assert phase["ready"] is True
+
+
+def _pass_time(unit_id: int, hours: float) -> None:
+    """Empurra para o passado tudo o que já aconteceu na estufa, como se `hours` tivessem passado."""
+    shift = timedelta(hours=hours)
+    with SessionLocal() as db:
+        unit = db.get(CuringUnit, unit_id)
+        for field in ("stage_started_at", "drying_started_at", "cycle_started_at"):
+            if getattr(unit, field) is not None:
+                setattr(unit, field, getattr(unit, field) - shift)
+        for segment in unit.stage_changes:
+            segment.started_at -= shift
+            if segment.ended_at is not None:
+                segment.ended_at -= shift
+        db.commit()
+
+
+def test_paused_time_does_not_count_and_drying_resumes(client, auth, drying_unit):
+    unit_id = drying_unit["unit"]["id"]
+    client.patch(f"/curing_units/{unit_id}", json={"estimated_duration_hours": 100}, headers=auth)
+    _pass_time(unit_id, 10)  # 10 h secando
+
+    stopped = client.post(f"/curing_units/{unit_id}/stop-drying", headers=auth).json()
+    assert stopped["interrupted"] is True
+    assert stopped["paused_at"] is not None
+    assert round(stopped["stage_hours"]) == 10
+
+    _pass_time(unit_id, 5)  # 5 h parada: não conta
+    resumed = client.post(f"/curing_units/{unit_id}/start-drying", headers=auth).json()
+    assert resumed["curing_stage"] == "Amarelação"
+    assert resumed["interrupted"] is False
+    assert round(resumed["stage_hours"]) == 10
+    assert round(resumed["phase"]["hours"]) == 10
+    assert round(resumed["cycle_hours"]) == 10
+    # Faltam 90 h das 100 previstas, contadas a partir da retomada.
+    remaining = datetime.fromisoformat(resumed["estimated_completion_at"].replace("Z", "+00:00")) - datetime.now(timezone.utc)
+    assert round(remaining.total_seconds() / 3600) == 90
+
+
+def test_new_batch_starts_over_and_closes_old_alerts(client, auth, drying_unit):
+    unit_id = drying_unit["unit"]["id"]
+    set_stage(client, auth, unit_id, "Murchamento")
+    send_reading(client, 53.0, 70.0)
+    assert "Temperatura alta" in active_alerts(client, auth)
+    _pass_time(unit_id, 8)
+    client.post(f"/curing_units/{unit_id}/stop-drying", headers=auth)
+
+    started = client.post(f"/curing_units/{unit_id}/start-drying?new_batch=true", headers=auth).json()
+    assert started["curing_stage"] == "Amarelação"
+    assert started["stage_hours"] < 0.1 and started["cycle_hours"] < 0.1
+    assert active_alerts(client, auth) == {}
+
+
+def test_finished_unit_always_starts_a_new_batch(client, auth, drying_unit):
+    unit_id = drying_unit["unit"]["id"]
+    set_stage(client, auth, unit_id, "Finalizado")
+    stopped = client.get(f"/curing_units/{unit_id}", headers=auth).json()
+    assert stopped["interrupted"] is False
+    started = client.post(f"/curing_units/{unit_id}/start-drying", headers=auth).json()
+    assert started["curing_stage"] == "Amarelação"
+    assert started["cycle_hours"] < 0.1

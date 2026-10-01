@@ -27,17 +27,20 @@ export function tempToCelsius(value, unit = prefs.unit) {
 }
 
 export const tempUnit = (unit = prefs.unit) => (unit === "F" ? "°F" : "°C");
-export const otherUnit = (unit = prefs.unit) => (unit === "F" ? "C" : "F");
 
 export function temp(celsius, { digits = 1, unit = prefs.unit } = {}) {
   if (celsius === null || celsius === undefined) return `-- ${tempUnit(unit)}`;
   return `${number(tempValue(celsius, unit), digits)} ${tempUnit(unit)}`;
 }
 
-/** "98,6 °F (37,0 °C)" */
-export function tempWithOther(celsius, digits = 1) {
-  if (celsius === null || celsius === undefined) return "--";
-  return `${temp(celsius, { digits })} (${temp(celsius, { digits, unit: otherUnit() })})`;
+/** "95 a 104 °F" */
+export function tempRange(min, max, unit = prefs.unit) {
+  return `${number(tempValue(min, unit), 0)} a ${number(tempValue(max, unit), 0)} ${tempUnit(unit)}`;
+}
+
+/** "80 a 95%" */
+export function humidityRange(min, max) {
+  return `${number(min, 0)} a ${number(max, 0)}%`;
 }
 
 export function humidity(value, digits = 1) {

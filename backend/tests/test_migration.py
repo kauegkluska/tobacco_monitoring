@@ -39,3 +39,9 @@ def test_legacy_database_is_migrated(tmp_path):
         assert connection.execute(text("SELECT COUNT(*) FROM readings")).scalar() == 1
         assert connection.execute(text("PRAGMA foreign_key_check")).fetchall() == []
         assert "value" in {row[1] for row in connection.execute(text("PRAGMA table_info(alerts)"))}
+        # Relé 1 vira o flap e relé 2 a ventoinha, que segue a temperatura alvo.
+        outputs = connection.execute(text(
+            "SELECT humidity_output_name, temperature_output_name, temperature_output_trigger, target_temperature "
+            "FROM curing_units"
+        )).fetchone()
+        assert tuple(outputs) == ("Flap", "Ventoinha", "temperature_target", None)

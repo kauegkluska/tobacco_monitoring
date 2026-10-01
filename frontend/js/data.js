@@ -2,7 +2,6 @@
 
 import { api } from "./api.js";
 import * as f from "./format.js";
-import { prefs } from "./store.js";
 
 // As quatro fases da cura, na ordem; a cor de cada uma vem do CSS (--phase-<key>).
 export const PHASES = [
@@ -20,7 +19,7 @@ export function phaseKey(stage) {
   return PHASES.find((phase) => phase.name === stage)?.key || null;
 }
 
-/** Faixa segura: a da fase em andamento; sem secagem, os limites do dispositivo. */
+/** Faixa esperada: a da fase em andamento; sem secagem, os limites do dispositivo. */
 export function limitsFor(unit, device) {
   return unit?.phase ? { ...unit.phase } : limitsOf(device);
 }
@@ -41,12 +40,6 @@ export async function loadOverview() {
   const [units, devices] = await Promise.all([api.get("/curing_units/"), api.get("/devices/")]);
   const devicesById = new Map(devices.map((device) => [device.id, device]));
   return { units, devices, devicesById };
-}
-
-/** Estufa escolhida pelo usuário (lembrada neste navegador) ou a primeira. */
-export function pickUnit(units, requestedId = prefs.unitId) {
-  if (!units.length) return null;
-  return units.find((unit) => String(unit.id) === String(requestedId)) || units[0];
 }
 
 export function limitsOf(device) {
@@ -76,11 +69,16 @@ export function isSevere(alert) {
   return alert.severity === "critical" || alert.severity === "emergency";
 }
 
-export function severityInfo(alert) {
-  if (!alert.is_active) return { kind: "ok", label: "Resolvido", icon: "checkCircle", className: "is-resolved" };
-  if (alert.severity === "emergency") return { kind: "crit", label: "Emergência", icon: "error", className: "is-critical" };
-  if (alert.severity === "critical") return { kind: "crit", label: "Crítico", icon: "error", className: "is-critical" };
-  return { kind: "warn", label: "Atenção", icon: "warning", className: "is-warning" };
+/** Gravidades da API, da mais grave para a mais leve. */
+export const SEVERITIES = [
+  { value: "emergency", label: "Emergência" },
+  { value: "critical", label: "Crítico" },
+  { value: "warning", label: "Atenção" },
+  { value: "info", label: "Informativo" },
+];
+
+export function severityLabel(alert) {
+  return SEVERITIES.find((item) => item.value === alert.severity)?.label || "Atenção";
 }
 
 export function signalQuality(rssi) {

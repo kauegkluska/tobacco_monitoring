@@ -79,13 +79,21 @@ def add_past_readings(unit_id: int, minutes_ago: range, temperature: float, humi
 
 
 def shift_stage_start(unit_id: int, hours: float) -> None:
-    """Faz a fase atual ter começado há mais tempo."""
+    """Faz a fase atual ter começado há mais tempo, com a secagem ligada o tempo todo."""
     from datetime import timedelta
 
     from core.database import SessionLocal
     from models.curing_unit import CuringUnit
 
+    shift = timedelta(hours=hours)
     with SessionLocal() as db:
         unit = db.get(CuringUnit, unit_id)
-        unit.stage_started_at -= timedelta(hours=hours)
+        unit.stage_started_at -= shift
+        if unit.drying_started_at is not None:
+            unit.drying_started_at -= shift
+        if unit.cycle_started_at is not None:
+            unit.cycle_started_at -= shift
+        for segment in unit.stage_changes:
+            if segment.ended_at is None:
+                segment.started_at -= shift
         db.commit()

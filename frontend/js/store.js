@@ -1,7 +1,7 @@
-// Preferências deste navegador (unidade, tema, estufa selecionada, aviso sonoro).
+// Preferências deste navegador (unidade, tema, aviso sonoro).
 
 const KEY = "monitor.prefs";
-const DEFAULTS = { unit: "F", theme: "auto", unitId: null, sound: true };
+const DEFAULTS = { unit: "F", theme: "auto", sound: true };
 
 function read() {
   try {
@@ -20,9 +20,6 @@ export const prefs = {
   },
   get theme() {
     return state.theme;
-  },
-  get unitId() {
-    return state.unitId;
   },
   /** Bipa e vibra quando o gateway toca o aviso sonoro. */
   get sound() {

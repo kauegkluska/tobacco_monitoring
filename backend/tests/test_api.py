@@ -115,6 +115,21 @@ def test_alerts_are_deduplicated_and_resolved(client, auth, drying_unit):
     assert len(client.get("/alerts/?active=false", headers=auth).json()) == 1
 
 
+def test_unit_list_has_latest_reading_and_alert_counts(client, auth, drying_unit):
+    client.post("/curing_units/", json={"name": "Estufa vazia"}, headers=auth)
+    set_stage(client, auth, drying_unit["unit"]["id"], "Murchamento")
+    send_reading(client, temperature=44.0, humidity=70.0)
+    send_reading(client, temperature=53.0, humidity=55.0)
+
+    units = {unit["name"]: unit for unit in client.get("/curing_units/", headers=auth).json()}
+    busy, empty = units["Estufa 01"], units["Estufa vazia"]
+    assert busy["latest"]["temperature"] == 53.0
+    assert busy["active_alerts"] == 2
+    assert busy["critical_alerts"] == 1
+    assert empty["latest"] is None
+    assert (empty["active_alerts"], empty["critical_alerts"]) == (0, 0)
+
+
 def test_alerts_follow_the_phase_and_escalate(client, auth, drying_unit):
     set_stage(client, auth, drying_unit["unit"]["id"], "Murchamento")
     send_reading(client, temperature=51.0, humidity=55.0)

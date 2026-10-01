@@ -92,7 +92,12 @@ class CuringUnit {
         phase = json['phase'] == null ? null : PhaseStatus.fromJson(json['phase'] as Map<String, dynamic>),
         latest = json['latest'] == null ? null : Reading.fromJson(json['latest'] as Map<String, dynamic>),
         activeAlerts = _int(json['active_alerts']) ?? 0,
-        criticalAlerts = _int(json['critical_alerts']) ?? 0;
+        criticalAlerts = _int(json['critical_alerts']) ?? 0,
+        targetTemperature = _double(json['target_temperature']),
+        stageHours = _double(json['stage_hours']),
+        cycleHours = _double(json['cycle_hours']),
+        interrupted = json['interrupted'] == true,
+        pausedAt = _date(json['paused_at']);
 
   final int id;
   final String name;
@@ -110,6 +115,17 @@ class CuringUnit {
   final Reading? latest;
   final int activeAlerts;
   final int criticalAlerts;
+
+  /// Temperatura alvo da ventoinha em °C, definida pelo produtor.
+  final double? targetTemperature;
+
+  /// Horas com a secagem ligada, sem o tempo parado: na fase atual e na estufada.
+  final double? stageHours;
+  final double? cycleHours;
+
+  /// Secagem parada no meio de uma fase: ao ligar, o produtor escolhe continuar ou começar outra estufada.
+  final bool interrupted;
+  final DateTime? pausedAt;
 
   bool get isFinished => stage == finishedStage;
 
@@ -346,6 +362,7 @@ const outputTriggers = {
   'temperature_out': 'Temperatura fora da faixa esperada',
   'temperature_high': 'Temperatura acima do máximo',
   'temperature_low': 'Temperatura abaixo do mínimo',
+  'temperature_target': 'Temperatura abaixo do alvo',
 };
 
 /// Saída (relé do sender) comandada pela API: "auto" segue [trigger]; "on"/"off" são manuais.
@@ -378,6 +395,9 @@ class OutputState {
   final bool inSync;
 
   String get relayLabel => pin.isEmpty ? 'Relé $relay' : 'Relé $relay · $pin';
+
+  /// No automático, segue a temperatura alvo (ventoinha).
+  bool get followsTarget => trigger == 'temperature_target';
 }
 
 /// Mudança no comando de uma saída. Quando ela liga, o gateway toca o aviso sonoro por 2 s.
@@ -409,7 +429,7 @@ class OutputEvent {
   final int unitId;
   final String? unitName;
 
-  String get displayName => outputName ?? (output == 'temperature' ? 'Saída de temperatura' : 'Saída de umidade');
+  String get displayName => outputName ?? (output == 'temperature' ? 'Ventoinha' : 'Flap');
 }
 
 class Outputs {
@@ -417,6 +437,7 @@ class Outputs {
       : unitId = json['curing_unit_id'] as int,
         isDrying = json['is_drying'] == true,
         confirmedAt = _date(json['confirmed_at']),
+        targetTemperature = _double(json['target_temperature']),
         humidity = OutputState.fromJson(json['humidity'] as Map<String, dynamic>),
         temperature = OutputState.fromJson(json['temperature'] as Map<String, dynamic>),
         lastBuzzer = json['last_buzzer'] == null ? null : OutputEvent.fromJson(json['last_buzzer'] as Map<String, dynamic>),
@@ -427,8 +448,14 @@ class Outputs {
 
   /// Última vez que o sender informou o estado dos relés.
   final DateTime? confirmedAt;
+
+  /// Temperatura alvo em °C (regra "temperature_target"); nula até o produtor definir.
+  final double? targetTemperature;
   final OutputState humidity;
   final OutputState temperature;
   final OutputEvent? lastBuzzer;
+
+  /// Alguma saída segue a temperatura alvo.
+  bool get usesTarget => humidity.followsTarget || temperature.followsTarget;
   final List<OutputEvent> events;
 }

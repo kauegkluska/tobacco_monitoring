@@ -10,6 +10,7 @@ from core.clock import utcnow
 from dependencies.auth import get_current_user
 from dependencies.db import get_db
 from dependencies.permissions import get_owned_curing_unit
+from models.alert import Alert
 from models.curing_unit import CuringUnit
 from models.device import Device
 from models.reading import Reading
@@ -22,15 +23,21 @@ from schemas.readings import ReadingOut, SeriesOut
 from services.device_service import device_status
 from services.output_service import describe, recent_reading, update_outputs
 from services.phases import FINISHED, NOT_STARTED, PHASES, current_phase, next_stage, phase_named
-from services.stage_service import change_stage, close_segment, open_segment, phase_status
+from services.stage_service import change_stage, close_segment, cycle_hours, open_segment, phase_status, stage_hours
 
 router = APIRouter()
 
 
 def _completion(unit: CuringUnit) -> datetime | None:
+    """Término previsto: o que falta da duração prevista, contado a partir de agora (paradas empurram o fim)."""
     if unit.drying_started_at is None or unit.estimated_duration_hours is None:
         return None
-    return unit.drying_started_at + timedelta(hours=unit.estimated_duration_hours)
+    remaining = max(0.0, unit.estimated_duration_hours - cycle_hours(unit))
+    return utcnow() + timedelta(hours=remaining)
+
+
+def _interrupted(unit: CuringUnit) -> bool:
+    return unit.drying_started_at is None and phase_named(unit.curing_stage) is not None
 
 
 def serialize_unit(unit: CuringUnit) -> dict:
@@ -38,6 +45,13 @@ def serialize_unit(unit: CuringUnit) -> dict:
     result["estimated_completion_at"] = _completion(unit)
     result["is_drying"] = unit.drying_started_at is not None
     result["phase"] = phase_status(unit)
+    in_phase = phase_named(unit.curing_stage) is not None
+    result["stage_hours"] = stage_hours(unit) if in_phase else None
+    result["cycle_hours"] = cycle_hours(unit) if unit.cycle_started_at is not None else None
+    result["interrupted"] = _interrupted(unit)
+    if result["interrupted"]:
+        ended = [change.ended_at for change in unit.stage_changes if change.ended_at is not None]
+        result["paused_at"] = max(ended) if ended else None
     if unit.device is not None:
         result["device_code"] = unit.device.device_code
         result["device_status"] = device_status(unit.device)
@@ -76,7 +90,43 @@ def get_curing_units(
     user: User = Depends(get_current_user),
 ):
     units = db.query(CuringUnit).filter(CuringUnit.user_id == user.id).order_by(CuringUnit.id).all()
-    return [serialize_unit(unit) for unit in units]
+    ids = [unit.id for unit in units]
+    if not ids:
+        return []
+
+    newest = (
+        db.query(Reading.curing_unit_id, func.max(Reading.timestamp).label("timestamp"))
+        .filter(Reading.curing_unit_id.in_(ids))
+        .group_by(Reading.curing_unit_id)
+        .subquery()
+    )
+    latest = {
+        reading.curing_unit_id: reading
+        for reading in db.query(Reading).join(
+            newest,
+            (Reading.curing_unit_id == newest.c.curing_unit_id) & (Reading.timestamp == newest.c.timestamp),
+        )
+    }
+    counts: dict[int, list[int]] = {}
+    alert_rows = (
+        db.query(Alert.curing_unit_id, Alert.severity, func.count(Alert.id))
+        .filter(Alert.curing_unit_id.in_(ids), Alert.is_active.is_(True))
+        .group_by(Alert.curing_unit_id, Alert.severity)
+    )
+    for unit_id, severity, count in alert_rows:
+        total = counts.setdefault(unit_id, [0, 0])
+        total[0] += count
+        if severity in ("critical", "emergency"):
+            total[1] += count
+
+    result = []
+    for unit in units:
+        item = serialize_unit(unit)
+        reading = latest.get(unit.id)
+        item["latest"] = ReadingOut.model_validate(reading).model_dump() if reading else None
+        item["active_alerts"], item["critical_alerts"] = counts.get(unit.id, (0, 0))
+        result.append(item)
+    return result
 
 
 @router.get("/{id}", response_model=CuringUnitOut)
@@ -135,17 +185,30 @@ def delete_curing_unit(
 
 @router.post("/{id}/start-drying", response_model=CuringUnitOut)
 def start_drying(
+    new_batch: bool = Query(False, description="Começa outra estufada na Amarelação em vez de continuar a parada"),
     db: Session = Depends(get_db),
     unit: CuringUnit = Depends(get_owned_curing_unit),
 ):
-    """Liga a secagem. Uma estufa nova (ou finalizada) começa na primeira fase, a Amarelação."""
+    """Liga a secagem.
+
+    Estufa nova ou finalizada começa uma estufada na Amarelação. Secagem parada no meio de uma fase continua de
+    onde parou (as horas da fase não contam o tempo parado), a menos que `new_batch` peça outra estufada.
+    """
     if unit.drying_started_at is not None:
         return serialize_unit(unit)
     now = utcnow()
-    unit.drying_started_at = now
-    if phase_named(unit.curing_stage) is None:
+    if new_batch or phase_named(unit.curing_stage) is None:
         unit.curing_stage = PHASES[0].name
         unit.stage_started_at = now
+        unit.cycle_started_at = now
+        # Alertas da estufada anterior não valem para a nova carga.
+        for alert in unit.alerts:
+            if alert.is_active:
+                alert.is_active = False
+                alert.resolved_at = now
+    elif unit.cycle_started_at is None:
+        unit.cycle_started_at = now
+    unit.drying_started_at = now
     # Retomada: continua na mesma fase, com um novo trecho no histórico.
     open_segment(unit, now)
     update_outputs(db, unit)
@@ -398,12 +461,14 @@ def update_output_modes(
     db: Session = Depends(get_db),
     unit: CuringUnit = Depends(get_owned_curing_unit),
 ):
-    """Troca nome, regra ou modo das saídas. O gateway recebe o novo comando na resposta da próxima leitura."""
+    """Troca nome, regra, modo ou temperatura alvo. O gateway recebe o novo comando na resposta da próxima leitura."""
     for output in ("humidity", "temperature"):
         for field in ("mode", "name", "trigger"):
             value = getattr(data, f"{output}_{field}")
             if value is not None:
                 setattr(unit, f"{output}_output_{field}", value)
+    if data.target_temperature is not None:
+        unit.target_temperature = data.target_temperature
     _refresh_outputs(db, unit)
     db.commit()
     db.refresh(unit)

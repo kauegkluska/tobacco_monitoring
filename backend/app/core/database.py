@@ -119,10 +119,13 @@ def initialize_database(target_engine=None) -> None:
             ))
             connection.execute(text(f"DROP TABLE {legacy_table}"))
 
-        def add_column(table: str, name: str, definition: str) -> None:
+        def add_column(table: str, name: str, definition: str) -> bool:
+            """Cria a coluna se faltar; devolve True quando criou."""
             columns = {column["name"] for column in inspect(connection).get_columns(table)}
-            if name not in columns:
-                connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {definition}"))
+            if name in columns:
+                return False
+            connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {definition}"))
+            return True
 
         add_column("devices", "device_code", "VARCHAR(100)")
         add_column("devices", "created_at", "DATETIME NOT NULL DEFAULT '1970-01-01 00:00:00'")
@@ -198,6 +201,29 @@ def initialize_database(target_engine=None) -> None:
         add_column("curing_units", "humidity_output_confirmed", "BOOLEAN")
         add_column("curing_units", "temperature_output_confirmed", "BOOLEAN")
         add_column("curing_units", "outputs_confirmed_at", "DATETIME")
+        if add_column("curing_units", "cycle_started_at", "DATETIME"):
+            # Estufadas já em andamento começam na última entrada na Amarelação.
+            connection.execute(text(
+                "UPDATE curing_units SET cycle_started_at = COALESCE("
+                "(SELECT MAX(started_at) FROM stage_changes s "
+                "WHERE s.curing_unit_id = curing_units.id AND s.stage = 'Amarelação'), "
+                "drying_started_at, stage_started_at) "
+                "WHERE curing_stage IN ('Amarelação', 'Murchamento', 'Secagem da folha', 'Secagem do talo')"
+            ))
+        if add_column("curing_units", "target_temperature", "FLOAT"):
+            # Uma vez só, ao criar a temperatura alvo: o relé 1 vira o flap e o relé 2 a ventoinha, que passa a
+            # seguir a temperatura alvo. Saídas renomeadas ou com outra regra pelo produtor ficam como estão.
+            connection.execute(text(
+                "UPDATE curing_units SET humidity_output_name = 'Flap' WHERE humidity_output_name = 'Saída de umidade'"
+            ))
+            connection.execute(text(
+                "UPDATE curing_units SET temperature_output_name = 'Ventoinha' "
+                "WHERE temperature_output_name = 'Saída de temperatura'"
+            ))
+            connection.execute(text(
+                "UPDATE curing_units SET temperature_output_trigger = 'temperature_target' "
+                "WHERE temperature_output_trigger = 'temperature_out'"
+            ))
         add_column("output_events", "metric", "VARCHAR(20)")
 
         # A cura passou a ter quatro fases (Amarelação, Murchamento, Secagem da folha e do talo).
