@@ -20,6 +20,7 @@ from schemas.alerts import AlertOut
 from schemas.curing_units import CuringUnitCreate, CuringUnitOut, CuringUnitUpdate, DryingEstimateOut
 from schemas.outputs import OutputsOut, OutputsUpdate
 from schemas.readings import ReadingOut, SeriesOut
+from services.cycle_service import FINISHED as CYCLE_FINISHED, STOPPED, close_cycle, resume_cycle, start_cycle
 from services.device_service import device_status
 from services.output_service import describe, recent_reading, update_outputs
 from services.phases import FINISHED, NOT_STARTED, PHASES, current_phase, next_stage, phase_named
@@ -148,8 +149,10 @@ def update_curing_unit(
         setattr(unit, field, value)
     if stage is not None and stage != unit.curing_stage:
         now = utcnow()
-        if stage in (NOT_STARTED, FINISHED) and unit.drying_started_at is not None:
-            _stop(db, unit, now)
+        if stage in (NOT_STARTED, FINISHED):
+            if unit.drying_started_at is not None:
+                _stop(db, unit, now)
+            close_cycle(unit, CYCLE_FINISHED if stage == FINISHED else STOPPED, now)
         change_stage(unit, stage, now)
         if unit.drying_started_at is not None:
             _refresh_outputs(db, unit)
@@ -198,6 +201,8 @@ def start_drying(
         return serialize_unit(unit)
     now = utcnow()
     if new_batch or phase_named(unit.curing_stage) is None:
+        # A estufada anterior, se parada no meio, fica nas últimas secagens como interrompida.
+        start_cycle(unit, now)
         unit.curing_stage = PHASES[0].name
         unit.stage_started_at = now
         unit.cycle_started_at = now
@@ -206,8 +211,10 @@ def start_drying(
             if alert.is_active:
                 alert.is_active = False
                 alert.resolved_at = now
-    elif unit.cycle_started_at is None:
-        unit.cycle_started_at = now
+    else:
+        if unit.cycle_started_at is None:
+            unit.cycle_started_at = now
+        resume_cycle(unit, now)
     unit.drying_started_at = now
     # Retomada: continua na mesma fase, com um novo trecho no histórico.
     open_segment(unit, now)
@@ -241,6 +248,7 @@ def advance_stage(
     stage = next_stage(phase)
     if stage == FINISHED:
         _stop(db, unit, now)
+        close_cycle(unit, CYCLE_FINISHED, now)
         change_stage(unit, stage, now)
     else:
         change_stage(unit, stage, now)

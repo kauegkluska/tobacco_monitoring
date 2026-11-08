@@ -8,11 +8,12 @@ import '../core/models.dart';
 import '../core/prefs.dart';
 import '../widgets/common.dart';
 import 'alerts_page.dart';
+import 'cycles_page.dart';
 import 'settings_page.dart';
 import 'unit_page.dart';
 import 'units_page.dart';
 
-enum AppTab { units, alerts, settings }
+enum AppTab { units, alerts, cycles, settings }
 
 /// Ações que as telas podem pedir para a estrutura principal.
 class ShellActions {
@@ -24,16 +25,20 @@ class ShellActions {
 }
 
 class _Destination {
-  const _Destination(this.label, this.icon, this.selectedIcon);
+  const _Destination(this.label, this.icon, this.selectedIcon, {String? title}) : title = title ?? label;
 
   final String label;
   final IconData icon;
   final IconData selectedIcon;
+
+  /// Título no topo da tela; o rótulo do menu pode ser mais curto.
+  final String title;
 }
 
 const _destinations = {
   AppTab.units: _Destination('Estufas', Icons.warehouse_outlined, Icons.warehouse),
   AppTab.alerts: _Destination('Alertas', Icons.notifications_outlined, Icons.notifications),
+  AppTab.cycles: _Destination('Secagens', Icons.history, Icons.history, title: 'Últimas secagens'),
   AppTab.settings: _Destination('Ajustes', Icons.settings_outlined, Icons.settings),
 };
 
@@ -138,6 +143,7 @@ class _HomeShellState extends State<HomeShell> {
     return switch (tab) {
       AppTab.units => UnitsPage(key: key, actions: actions),
       AppTab.alerts => AlertsPage(key: key, actions: actions),
+      AppTab.cycles => CyclesPage(key: key),
       AppTab.settings => SettingsPage(key: key, actions: actions),
     };
   }
@@ -157,7 +163,7 @@ class _HomeShellState extends State<HomeShell> {
 
     final appBar = AppBar(
       titleSpacing: 16,
-      title: Text(_destinations[tab]!.label, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
+      title: Text(_destinations[tab]!.title, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
       actions: [
         ValueListenableBuilder<bool>(
           valueListenable: api.online,

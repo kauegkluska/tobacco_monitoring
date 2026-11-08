@@ -248,6 +248,24 @@ def initialize_database(target_engine=None) -> None:
             "SELECT 1 FROM stage_changes WHERE stage_changes.curing_unit_id = curing_units.id "
             "AND stage_changes.ended_at IS NULL)"
         ))
+        # Últimas secagens: estufas de versões anteriores ganham o registro da estufada atual (ou da última).
+        phases = "('Amarelação', 'Murchamento', 'Secagem da folha', 'Secagem do talo')"
+        connection.execute(text(
+            "INSERT INTO curing_cycles (curing_unit_id, started_at, ended_at, status, final_stage) "
+            "SELECT id, started, "
+            f"CASE WHEN curing_stage IN {phases} THEN NULL ELSE MAX(started, COALESCE(last_end, stage_started_at)) END, "
+            f"CASE WHEN curing_stage IN {phases} THEN 'in_progress' "
+            "WHEN curing_stage = 'Finalizado' THEN 'finished' ELSE 'stopped' END, "
+            f"CASE WHEN curing_stage IN {phases} THEN NULL ELSE last_stage END "
+            "FROM (SELECT u.id, u.curing_stage, u.stage_started_at, COALESCE(u.cycle_started_at, "
+            "(SELECT MIN(s.started_at) FROM stage_changes s WHERE s.curing_unit_id = u.id), u.drying_started_at) AS started, "
+            "(SELECT MAX(s.ended_at) FROM stage_changes s WHERE s.curing_unit_id = u.id) AS last_end, "
+            "(SELECT s.stage FROM stage_changes s WHERE s.curing_unit_id = u.id ORDER BY s.started_at DESC LIMIT 1) AS last_stage "
+            "FROM curing_units u "
+            f"WHERE (u.cycle_started_at IS NOT NULL OR u.curing_stage IN {phases}) "
+            "AND NOT EXISTS (SELECT 1 FROM curing_cycles c WHERE c.curing_unit_id = u.id)) "
+            "WHERE started IS NOT NULL"
+        ))
 
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_curing_units_id ON curing_units (id)"))
         connection.execute(text(

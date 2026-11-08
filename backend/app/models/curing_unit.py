@@ -49,3 +49,6 @@ class CuringUnit(Base):
     stage_changes = relationship(
         "StageChange", back_populates="curing_unit", cascade="all, delete-orphan", order_by="StageChange.started_at",
     )
+    cycles = relationship(
+        "CuringCycle", back_populates="curing_unit", cascade="all, delete-orphan", order_by="CuringCycle.started_at",
+    )

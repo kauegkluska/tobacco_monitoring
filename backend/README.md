@@ -71,6 +71,12 @@ O SHT40 mede umidade relativa, não bulbo úmido: os limites de umidade são par
 
 Os períodos de cada fase ficam em `stage_changes` e aparecem em `GET /curing_units/{id}/series` (campo `phases`), que o painel e o app usam para colorir o gráfico.
 
+## Últimas secagens
+
+Cada estufada (carga de tabaco) fica registrada em `curing_cycles`: abre ao iniciar a secagem na Amarelação e fecha ao finalizar a cura (`finished`) ou ao começar outra estufada com a anterior parada no meio (`stopped`). Parar e retomar a mesma estufada não abre outra. Se a fase for corrigida depois de finalizar, ao ligar a secagem a mesma estufada reabre.
+
+Leituras, alertas e fases continuam nas próprias tabelas; `GET /curing-cycles/` resume o período de cada estufada (horas por fase, mínima/média/máxima e alertas). Bancos de versões anteriores ganham o registro da estufada atual (ou da última) ao iniciar a API.
+
 ## Endpoints principais
 
 | Método e caminho | Descrição |
@@ -93,6 +99,8 @@ Os períodos de cada fase ficam em `stage_changes` e aparecem em `GET /curing_un
 | `GET /alerts/?active=true`, `POST /alerts/{id}/acknowledge`, `.../resolve` | Central de alertas |
 | `GET/PATCH /curing_units/{id}/outputs` | Saídas (relés 1 e 2): nome, modo (`auto`, `on`, `off`), regra do automático e confirmação do sender |
 | `GET /output-events/?after_id=&buzzer=true` | Mudanças nas saídas; `buzzer: true` quando o gateway tocou o aviso |
+| `GET /curing-cycles/?curing_unit_id=&limit=` | Últimas secagens (estufadas), da mais nova para a mais antiga, com o resumo de cada uma |
+| `GET /curing-cycles/{id}` | Uma secagem, com os alertas do período |
 
 Todas as datas saem em UTC com fuso (`...Z`). Temperaturas são sempre em °C; o painel e o app convertem para °F só na exibição.
 

@@ -15,6 +15,7 @@ import '../widgets/line_chart.dart';
 import '../widgets/phases.dart';
 import '../widgets/unit_forms.dart';
 import '../widgets/unit_widgets.dart';
+import 'cycles_page.dart';
 
 /// Abre a tela da estufa por cima das abas.
 Future<void> openUnit(BuildContext context, int unitId) {
@@ -656,6 +657,11 @@ class _UnitPageState extends State<UnitPage> {
                   icon: Icons.play_arrow,
                   onPressed: device == null ? null : () => _startDrying(current),
                 ),
+              TextButton.icon(
+                onPressed: () => openUnitCycles(context, current),
+                icon: const Icon(Icons.history),
+                label: const Text('Últimas secagens'),
+              ),
             ],
           ),
           if (!current.isDrying && device == null) ...[

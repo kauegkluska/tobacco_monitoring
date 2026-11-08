@@ -7,7 +7,7 @@ import { PHASES, chartPhases, isSevere, limitsFor, signalQuality, stageOptions }
 import { badge, banner, button, clear, confirmDialog, field, h, icon, loadingState, openModal, segmented, select, toast, withBusy } from "../dom.js";
 import * as f from "../format.js";
 import { prefs } from "../store.js";
-import { alertCard, isStale, phaseCheckLabel, phaseTag, reading, statusBadge, unitStatus } from "../widgets.js";
+import { alertCard, isStale, phaseCheckLabel, phaseSteps, phaseTag, reading, statusBadge, unitStatus } from "../widgets.js";
 
 const POLL_MS = 5000;
 const SERIES_REFRESH_MS = 60_000;
@@ -261,22 +261,6 @@ export function renderUnit(ctx) {
     // Com a secagem parada no meio da cura, a fase em que parou continua marcada.
     const current = phase?.number ?? PHASES.findIndex((item) => item.name === unit.curing_stage) + 1;
 
-    // As quatro fases em sequência, com a cor de cada uma.
-    const steps = h(
-      "ol",
-      { class: "phase-steps", "aria-label": "Fases da cura" },
-      PHASES.map((item, index) => {
-        const number = index + 1;
-        const status = finished || (current && number < current) ? "is-done" : number === current ? "is-current" : "";
-        return h(
-          "li",
-          { class: `phase-step phase-${item.key} ${status}`, "aria-current": status === "is-current" ? "step" : null },
-          h("span", { class: "phase-step-bar", "aria-hidden": "true" }),
-          h("span", { class: "phase-step-name" }, status === "is-done" ? icon("check") : null, item.name),
-        );
-      }),
-    );
-
     const details = unit.is_drying || unit.interrupted
       ? h(
           "dl",
@@ -338,8 +322,13 @@ export function renderUnit(ctx) {
     return h(
       "section",
       { class: "card" },
-      h("div", { class: "card-header" }, h("h2", {}, icon("eco"), "Cura")),
-      steps,
+      h(
+        "div",
+        { class: "card-header" },
+        h("h2", {}, icon("eco"), "Cura"),
+        h("a", { class: "btn btn-ghost btn-sm", href: `#/secagens?estufa=${unit.id}` }, icon("history"), h("span", {}, "Últimas secagens")),
+      ),
+      phaseSteps(current, finished),
       unit.interrupted
         ? h("p", { class: "small text-2 paused-note" }, `Parada em ${unit.curing_stage}${unit.paused_at ? ` ${f.relative(unit.paused_at)}` : ""}. O tempo parado não conta.`)
         : null,

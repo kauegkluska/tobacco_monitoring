@@ -1,7 +1,7 @@
 // Peças de interface usadas em mais de uma tela: situação da estufa, leituras e alertas.
 
 import { api } from "./api.js";
-import { isSevere, limitsFor, phaseKey, rangeState, severityLabel } from "./data.js";
+import { PHASES, isSevere, limitsFor, phaseKey, rangeState, severityLabel } from "./data.js";
 import { badge, button, confirmDialog, h, icon, toast, withBusy } from "./dom.js";
 import * as f from "./format.js";
 
@@ -53,6 +53,24 @@ export function phaseTag(unit) {
     { class: `phase-tag phase-${phaseKey(unit.curing_stage) || "other"}` },
     h("span", { class: "phase-swatch", "aria-hidden": "true" }),
     phase ? `Fase ${phase.number} de ${phase.total} · ${unit.curing_stage}` : unit.curing_stage,
+  );
+}
+
+/** As quatro fases em sequência: concluídas, a atual (`current`, 1 a 4) em destaque e as próximas apagadas. */
+export function phaseSteps(current, finished) {
+  return h(
+    "ol",
+    { class: "phase-steps", "aria-label": "Fases da cura" },
+    PHASES.map((item, index) => {
+      const number = index + 1;
+      const status = finished || (current && number < current) ? "is-done" : number === current ? "is-current" : "";
+      return h(
+        "li",
+        { class: `phase-step phase-${item.key} ${status}`, "aria-current": status === "is-current" ? "step" : null },
+        h("span", { class: "phase-step-bar", "aria-hidden": "true" }),
+        h("span", { class: "phase-step-name" }, status === "is-done" ? icon("check") : null, item.name),
+      );
+    }),
   );
 }
 

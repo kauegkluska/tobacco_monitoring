@@ -12,6 +12,7 @@ from core.config import settings
 from core.database import SessionLocal, initialize_database
 from core.discovery import DiscoveryAnnouncer
 from models.alert import Alert  # noqa: F401  (registra os modelos antes do create_all)
+from models.curing_cycle import CuringCycle  # noqa: F401
 from models.curing_unit import CuringUnit  # noqa: F401
 from models.device import Device  # noqa: F401
 from models.output_event import OutputEvent  # noqa: F401
@@ -20,6 +21,7 @@ from models.stage_change import StageChange  # noqa: F401
 from models.user import User  # noqa: F401
 from routers.alerts import router as alerts_router
 from routers.auth import router as auth_router
+from routers.curing_cycles import router as curing_cycles_router
 from routers.curing_units import router as curing_units_router
 from routers.devices import router as devices_router
 from routers.output_events import router as output_events_router
@@ -77,6 +79,7 @@ app.add_middleware(
 
 app.include_router(readings_router, prefix="/readings", tags=["readings"])
 app.include_router(curing_units_router, prefix="/curing_units", tags=["curing_units"])
+app.include_router(curing_cycles_router, prefix="/curing-cycles", tags=["curing_cycles"])
 app.include_router(devices_router, prefix="/devices", tags=["devices"])
 app.include_router(alerts_router, prefix="/alerts", tags=["alerts"])
 app.include_router(output_events_router, prefix="/output-events", tags=["outputs"])

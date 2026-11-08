@@ -22,6 +22,8 @@ Para servir a pasta separadamente (por exemplo, durante o desenvolvimento), use 
 | **Estufas** (`#/estufas`) | Um cartão por estufa: situação (Normal, Fora da faixa, Atenção, Crítico, Sem sinal, Parada), fase, temperatura e umidade com a faixa esperada, alertas ativos. |
 | **Estufa** (`#/estufa/<id>`) | Tudo da estufa: leituras, alertas ativos, cura (fases, condições para avançar, iniciar/parar), histórico (período, temperatura/umidade, mín/méd/máx, CSV), saídas e sensor (vincular, verificar, desvincular). Em **Opções**: renomear, duração prevista, corrigir fase e excluir. |
 | **Alertas** (`#/alertas`) | Ativos, resolvidos e todos, com filtro por estufa e gravidade. Permite reconhecer e resolver. |
+| **Últimas secagens** (`#/secagens`) | Uma linha por estufada: estufa, período, como terminou (em andamento, concluída, interrompida), fases, tempo de secagem e temperatura. Filtro por estufa (`#/secagens?estufa=3`, atalho no card Cura). |
+| **Secagem** (`#/secagem/<id>`) | Resumo da estufada, tempo em cada fase, gráfico do período inteiro, CSV e alertas da secagem. |
 | **Ajustes** (`#/ajustes`) | Unidade (°F/°C), tema, aviso sonoro, conta, senha, servidor e legenda das situações. |
 
 ## Estrutura

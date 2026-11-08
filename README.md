@@ -64,6 +64,7 @@ flowchart LR
 - Histórico colorido por fase: o fundo do gráfico e a faixa esperada mudam a cada fase.
 - Duração prevista, progresso e término estimado.
 - Secagem parada no meio da cura: ao ligar de novo, o produtor escolhe **continuar** a mesma estufada ou começar uma **nova estufada**. O tempo parado não conta nas horas da fase nem no término previsto.
+- **Últimas secagens**: cada estufada fica guardada numa página própria, com período, como terminou (concluída ou interrompida), tempo em cada fase, mínima/média/máxima, gráfico do período e alertas.
 - Sinal LoRa (RSSI/SNR) e estado online/offline de cada sensor.
 
 ### Alertas
@@ -296,11 +297,11 @@ Principais constantes do firmware:
 ## Testes
 
 ```powershell
-# API: 58 testes (autenticação, leituras, fases, alertas, saídas, mDNS, migração)
+# API: 71 testes (autenticação, leituras, fases, secagens, alertas, saídas, mDNS, migração)
 cd backend
 venv\Scripts\python -m pytest
 
-# App: análise estática e 12 testes
+# App: análise estática e 19 testes
 cd frontend_mobile
 flutter analyze
 flutter test

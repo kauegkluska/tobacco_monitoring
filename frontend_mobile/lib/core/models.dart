@@ -335,6 +335,71 @@ class Series {
   }
 }
 
+/// Horas com a secagem ligada numa fase da estufada.
+class CyclePhaseHours {
+  CyclePhaseHours.fromJson(Map<String, dynamic> json)
+      : stage = json['stage']?.toString() ?? '',
+        key = json['key']?.toString(),
+        hours = _double(json['hours']) ?? 0;
+
+  final String stage;
+  final String? key;
+  final double hours;
+}
+
+/// Uma estufada (carga de tabaco): período, como terminou e o resumo das leituras e alertas.
+class CuringCycle {
+  CuringCycle.fromJson(Map<String, dynamic> json)
+      : id = json['id'] as int,
+        unitId = json['curing_unit_id'] as int,
+        unitName = json['curing_unit_name']?.toString() ?? 'Estufa',
+        startedAt = _date(json['started_at'])!,
+        endedAt = _date(json['ended_at']),
+        status = json['status']?.toString() ?? 'in_progress',
+        finalStage = json['final_stage']?.toString(),
+        isDrying = json['is_drying'] == true,
+        dryingHours = _double(json['drying_hours']) ?? 0,
+        phases = ((json['phases'] as List?) ?? const []).map((item) => CyclePhaseHours.fromJson(item as Map<String, dynamic>)).toList(),
+        stats = SeriesStats.fromJson(json['stats'] as Map<String, dynamic>),
+        alerts = _int(json['alerts']) ?? 0,
+        criticalAlerts = _int(json['critical_alerts']) ?? 0,
+        alertItems = ((json['alert_items'] as List?) ?? const []).map((item) => AlertItem.fromJson(item as Map<String, dynamic>)).toList();
+
+  final int id;
+  final int unitId;
+  final String unitName;
+  final DateTime startedAt;
+
+  /// Nulo enquanto a estufada está em andamento.
+  final DateTime? endedAt;
+
+  /// "in_progress", "finished" (cura concluída) ou "stopped" (encerrada antes de concluir).
+  final String status;
+
+  /// Fase atual (em andamento) ou última fase em que a estufada esteve.
+  final String? finalStage;
+  final bool isDrying;
+
+  /// Horas com a secagem ligada, sem o tempo parado.
+  final double dryingHours;
+  final List<CyclePhaseHours> phases;
+  final SeriesStats stats;
+  final int alerts;
+  final int criticalAlerts;
+
+  /// Só no detalhe (/curing-cycles/{id}).
+  final List<AlertItem> alertItems;
+
+  bool get inProgress => status == 'in_progress';
+  bool get isFinished => status == 'finished';
+
+  /// Número da última fase alcançada (1 a 4), ou null.
+  int? get stageNumber {
+    final index = curingPhases.indexWhere((phase) => phase.name == finalStage);
+    return index < 0 ? null : index + 1;
+  }
+}
+
 class UserProfile {
   UserProfile.fromJson(Map<String, dynamic> json)
       : id = json['id'] as int,

@@ -7,6 +7,7 @@ App para celular e tablet com as mesmas telas do painel web:
 | **Estufas** | Um cartão por estufa: situação (Normal, Fora da faixa, Atenção, Crítico, Sem sinal, Parada), fase, temperatura e umidade com a faixa esperada, alertas ativos. Toque para abrir. |
 | **Estufa** | Tudo da estufa numa tela: leituras, alertas ativos, cura (fases, condições para avançar, iniciar/parar), histórico (período, temperatura/umidade, mín/méd/máx), saídas e sensor (vincular pelo QR code, verificar, desvincular). No menu ⋮: renomear, duração prevista, corrigir fase e excluir. |
 | **Alertas** | Ativos, resolvidos e todos, com filtro por estufa e gravidade. Permite reconhecer e resolver. |
+| **Últimas secagens** | Cada estufada guardada: estufa, período, como terminou (em andamento, concluída, interrompida), fases, tempo de secagem e temperatura. Toque para ver o tempo em cada fase, o gráfico do período e os alertas. Também abre pelo card Cura da estufa. |
 | **Ajustes** | Unidade (°F/°C), tema, aviso sonoro no celular, notificações com o app fechado, conta, senha, servidor e legenda das situações. |
 
 Quando o gateway toca o aviso sonoro (uma saída ligou), o app mostra um aviso na tela e, se ativado em Ajustes, bipa e vibra o celular.

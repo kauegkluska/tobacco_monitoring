@@ -12,6 +12,7 @@ import 'package:monitor_ambiental/core/models.dart';
 import 'package:monitor_ambiental/core/prefs.dart';
 import 'package:monitor_ambiental/core/theme.dart';
 import 'package:monitor_ambiental/widgets/common.dart';
+import 'package:monitor_ambiental/pages/cycles_page.dart';
 import 'package:monitor_ambiental/pages/login_page.dart';
 import 'package:monitor_ambiental/pages/qr_scanner_page.dart';
 import 'package:monitor_ambiental/pages/shell.dart';
@@ -463,6 +464,86 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
       expect(posts.single, endsWith('/curing_units/1/start-drying?new_batch=true'));
+    });
+  });
+
+  group('últimas secagens', () {
+    final finished = {
+      'id': 1, 'curing_unit_id': 1, 'curing_unit_name': 'Estufa 01',
+      'started_at': '2026-09-20T08:00:00Z', 'ended_at': '2026-09-26T14:00:00Z',
+      'status': 'finished', 'final_stage': 'Secagem do talo', 'is_drying': false, 'drying_hours': 146.0,
+      'phases': [
+        {'stage': 'Amarelação', 'key': 'amarelacao', 'hours': 40.0},
+        {'stage': 'Murchamento', 'key': 'murchamento', 'hours': 20.0},
+        {'stage': 'Secagem da folha', 'key': 'secagem_folha', 'hours': 46.0},
+        {'stage': 'Secagem do talo', 'key': 'secagem_talo', 'hours': 40.0},
+      ],
+      'stats': {'count': 1234, 'temperature_min': 35.0, 'temperature_avg': 52.0, 'temperature_max': 73.0, 'humidity_min': 18.0, 'humidity_avg': 55.0, 'humidity_max': 92.0},
+      'alerts': 2, 'critical_alerts': 1,
+    };
+    final stopped = {
+      ...finished,
+      'id': 2, 'curing_unit_id': 2, 'curing_unit_name': 'Estufa 02', 'status': 'stopped', 'final_stage': 'Murchamento',
+      'drying_hours': 30.0, 'phases': [], 'stats': {'count': 0}, 'alerts': 0, 'critical_alerts': 0,
+    };
+    final running = {
+      ...finished,
+      'id': 3, 'ended_at': null, 'status': 'in_progress', 'final_stage': 'Amarelação', 'is_drying': true, 'drying_hours': 5.0,
+    };
+
+    ApiClient fakeApi(Object Function(String path) respond) => ApiClient(
+          client: MockClient((request) async => http.Response.bytes(
+                utf8.encode(jsonEncode(respond(request.url.path))),
+                200,
+                headers: {'content-type': 'application/json; charset=utf-8'},
+              )),
+        );
+
+    testWidgets('lista mostra como cada estufada terminou', (tester) async {
+      final api = fakeApi((path) => path == '/curing-cycles/' ? [running, stopped, finished] : <dynamic>[]);
+      await tester.pumpWidget(_wrap(const Scaffold(body: CyclesPage()), api: api));
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.byWidgetPredicate((widget) => widget is StatusBadge && widget.label == 'Em andamento'), findsOneWidget);
+      expect(find.byWidgetPredicate((widget) => widget is StatusBadge && widget.label == 'Interrompida'), findsOneWidget);
+      expect(find.byWidgetPredicate((widget) => widget is StatusBadge && widget.label == 'Concluída'), findsOneWidget);
+      expect(find.text('6 d 2 h'), findsOneWidget);
+      expect(find.textContaining('1.234 leituras'), findsNWidgets(2));
+      // Duas estufas: aparece o filtro.
+      expect(find.text('Estufa'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('detalhe cabe num celular de 360 dp', (tester) async {
+      tester.view.physicalSize = const Size(360, 780);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final api = fakeApi((path) => switch (path) {
+            '/curing-cycles/1' => {
+                ...finished,
+                'alert_items': [
+                  {'id': 4, 'type': 'Temperatura alta', 'severity': 'critical', 'is_active': false, 'message': 'Temperatura acima do limite.', 'value': 43.0, 'threshold': 42, 'timestamp': '2026-09-21T10:00:00Z', 'resolved_at': '2026-09-21T11:00:00Z', 'curing_unit_id': 1},
+                ],
+              },
+            '/curing_units/1/series' => {
+                'since': '2026-09-20T08:00:00Z', 'until': '2026-09-26T14:00:00Z', 'bucket_seconds': 3000,
+                'points': [], 'stats': {'count': 0}, 'phases': [],
+              },
+            _ => <dynamic>[],
+          });
+      await tester.pumpWidget(_wrap(const CycleDetailPage(cycleId: 1), api: api));
+      await tester.pump();
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('Secagem · Estufa 01'), findsOneWidget);
+      expect(find.text('Última fase · Secagem do talo'), findsOneWidget);
+      expect(find.text('Tempo em cada fase'), findsOneWidget);
+      expect(find.text('1 d 22 h'), findsOneWidget);
+      await tester.scrollUntilVisible(find.text('Alertas desta secagem'), 300);
+      expect(find.text('Temperatura alta'), findsOneWidget);
+      expect(tester.takeException(), isNull);
     });
   });
 }

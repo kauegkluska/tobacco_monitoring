@@ -5,6 +5,7 @@ import { api } from "./api.js";
 import { clear, h, icon, toast } from "./dom.js";
 import { renderAlerts } from "./pages/alerts.js";
 import { renderAuth } from "./pages/auth.js";
+import { renderCycle, renderCycles } from "./pages/cycles.js";
 import { renderSettings } from "./pages/settings.js";
 import { renderUnit } from "./pages/unit.js";
 import { renderUnits } from "./pages/units.js";
@@ -13,10 +14,14 @@ import { applyTheme } from "./store.js";
 const ROUTES = [
   { path: "estufas", label: "Estufas", icon: "warehouse", render: renderUnits },
   { path: "alertas", label: "Alertas", icon: "bell", render: renderAlerts },
+  { path: "secagens", label: "Secagens", title: "Últimas secagens", icon: "history", render: renderCycles },
   { path: "ajustes", label: "Ajustes", icon: "tune", render: renderSettings },
 ];
-// A tela de uma estufa (#/estufa/3) fica sob a aba Estufas.
-const UNIT_ROUTE = { path: "estufa", label: "Estufa", nav: "estufas", render: renderUnit };
+// A tela de uma estufa (#/estufa/3) fica sob a aba Estufas, e a de uma secagem (#/secagem/5) sob Secagens.
+const DETAIL_ROUTES = [
+  { path: "estufa", label: "Estufa", nav: "estufas", render: renderUnit },
+  { path: "secagem", label: "Secagem", nav: "secagens", render: renderCycle },
+];
 // Endereços das versões anteriores do painel.
 const OLD_PATHS = { inicio: "estufas", historico: "estufas", perfil: "ajustes" };
 const BADGE_POLL_MS = 30_000;
@@ -30,7 +35,8 @@ let badgeTimer = null;
 function parseHash() {
   const [path, queryString = ""] = window.location.hash.replace(/^#\/?/, "").split("?");
   const [name, param] = path.split("/");
-  const route = name === UNIT_ROUTE.path && /^\d+$/.test(param || "") ? UNIT_ROUTE : ROUTES.find((item) => item.path === name) || null;
+  const detail = /^\d+$/.test(param || "") ? DETAIL_ROUTES.find((item) => item.path === name) : null;
+  const route = detail || ROUTES.find((item) => item.path === name) || null;
   return { route, name, param, query: new URLSearchParams(queryString) };
 }
 
@@ -142,7 +148,7 @@ function renderRoute() {
     },
     logout,
   };
-  ctx.setTitle(route.label);
+  ctx.setTitle(route.title || route.label);
   current = route.render(ctx);
   clear(shell.view, current.el);
   const active = route.nav || route.path;
