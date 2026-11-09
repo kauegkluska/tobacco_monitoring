@@ -1,5 +1,6 @@
 from core.config import settings
-from conftest import register, send_reading, set_stage
+import pytest
+from conftest import Sim, register, send_reading, set_stage
 
 
 def test_register_validates_input(client):
@@ -100,9 +101,8 @@ def test_unknown_device_is_registered_for_linking(client, auth):
 
 
 def test_alerts_are_deduplicated_and_resolved(client, auth, drying_unit):
-    set_stage(client, auth, drying_unit["unit"]["id"], "Murchamento")
-    for _ in range(3):
-        send_reading(client, temperature=53.0, humidity=70.0)
+    sim = Sim(drying_unit["unit"]["id"], "Murchamento")
+    sim.run(4, 53.0, 40.0)
 
     active = client.get("/alerts/?active=true", headers=auth).json()
     assert len(active) == 1
@@ -110,44 +110,45 @@ def test_alerts_are_deduplicated_and_resolved(client, auth, drying_unit):
     assert active[0]["severity"] == "critical"
     assert active[0]["curing_unit_name"] == "Estufa 01"
 
-    send_reading(client, temperature=45.0, humidity=70.0)
-    assert client.get("/alerts/?active=true", headers=auth).json() == []
-    assert len(client.get("/alerts/?active=false", headers=auth).json()) == 1
+    sim.run(4, 45.0, 40.0)
+    still_open = client.get("/alerts/?active=true", headers=auth).json()
+    # O ar seco no Murchamento é só informativo e não tem relação com a temperatura.
+    assert [alert["type"] for alert in still_open if alert["severity"] != "info"] == []
+    assert len(client.get("/alerts/?active=false", headers=auth).json()) >= 1
 
 
 def test_unit_list_has_latest_reading_and_alert_counts(client, auth, drying_unit):
     client.post("/curing_units/", json={"name": "Estufa vazia"}, headers=auth)
-    set_stage(client, auth, drying_unit["unit"]["id"], "Murchamento")
-    send_reading(client, temperature=44.0, humidity=70.0)
-    send_reading(client, temperature=53.0, humidity=55.0)
+    # 53 °C com ar úmido: temperatura alta e bulbo úmido alto, ambos críticos.
+    Sim(drying_unit["unit"]["id"], "Murchamento").run(4, 53.0, 70.0)
 
     units = {unit["name"]: unit for unit in client.get("/curing_units/", headers=auth).json()}
     busy, empty = units["Estufa 01"], units["Estufa vazia"]
-    assert busy["latest"]["temperature"] == 53.0
+    assert busy["latest"]["temperature"] == pytest.approx(53.0, abs=0.05)
     assert busy["active_alerts"] == 2
-    assert busy["critical_alerts"] == 1
+    assert busy["critical_alerts"] == 2
     assert empty["latest"] is None
     assert (empty["active_alerts"], empty["critical_alerts"]) == (0, 0)
 
 
 def test_alerts_follow_the_phase_and_escalate(client, auth, drying_unit):
-    set_stage(client, auth, drying_unit["unit"]["id"], "Murchamento")
-    send_reading(client, temperature=51.0, humidity=55.0)
+    sim = Sim(drying_unit["unit"]["id"], "Murchamento")
+    sim.run(3, 49.0, 40.0)
     active = {alert["type"]: alert for alert in client.get("/alerts/?active=true", headers=auth).json()}
-    assert set(active) == {"Temperatura alta", "Umidade baixa"}
     assert active["Temperatura alta"]["severity"] == "warning"
-    assert active["Temperatura alta"]["threshold"] == 50
+    assert active["Temperatura alta"]["threshold"] == 47.8
     assert "na fase de Murchamento" in active["Temperatura alta"]["message"]
 
     # Passou de 52 °C: o alerta de atenção fecha e abre um crítico (nova notificação).
-    send_reading(client, temperature=52.5, humidity=55.0)
+    sim.run(3, 52.5, 40.0)
     temperature = [alert for alert in client.get("/alerts/", headers=auth).json() if alert["type"] == "Temperatura alta"]
-    assert [(alert["severity"], alert["is_active"]) for alert in temperature] == [("critical", True), ("warning", False)]
+    assert sorted((alert["severity"], alert["is_active"]) for alert in temperature) == [("critical", True), ("warning", False)]
+    critical_id = next(alert["id"] for alert in temperature if alert["is_active"])
 
-    # Voltar a 51 °C não rebaixa o alerta crítico.
-    send_reading(client, temperature=51.0, humidity=55.0)
+    # Voltar a 49 °C rebaixa o mesmo alerta, sem abrir outro.
+    sim.run(4, 49.0, 40.0)
     active = [alert for alert in client.get("/alerts/?active=true", headers=auth).json() if alert["type"] == "Temperatura alta"]
-    assert [alert["severity"] for alert in active] == ["critical"]
+    assert [(alert["id"], alert["severity"]) for alert in active] == [(critical_id, "warning")]
 
 
 def test_thresholds_must_be_ordered(client, auth, drying_unit):
@@ -160,8 +161,7 @@ def test_thresholds_must_be_ordered(client, auth, drying_unit):
 
 
 def test_acknowledge_and_resolve_alert(client, auth, drying_unit):
-    set_stage(client, auth, drying_unit["unit"]["id"], "Murchamento")
-    send_reading(client, temperature=53.0, humidity=70.0)
+    Sim(drying_unit["unit"]["id"], "Murchamento").run(4, 53.0, 40.0)
     alert = client.get("/alerts/", headers=auth).json()[0]
 
     acknowledged = client.post(f"/alerts/{alert['id']}/acknowledge", headers=auth).json()
@@ -172,8 +172,7 @@ def test_acknowledge_and_resolve_alert(client, auth, drying_unit):
 
 
 def test_alerts_are_private(client, auth, drying_unit):
-    set_stage(client, auth, drying_unit["unit"]["id"], "Murchamento")
-    send_reading(client, temperature=53.0, humidity=70.0)
+    Sim(drying_unit["unit"]["id"], "Murchamento").run(4, 53.0, 40.0)
     alert_id = client.get("/alerts/", headers=auth).json()[0]["id"]
 
     other = register(client, login="vizinho")

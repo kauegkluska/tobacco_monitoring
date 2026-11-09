@@ -241,7 +241,10 @@ class AlertItem {
   bool get isCritical => severity == 'critical' || severity == 'emergency';
   bool get isEmergency => severity == 'emergency';
   String get severityLabel => severityLabels[severity] ?? 'Atenção';
-  bool get isTemperature => type.startsWith('Temperatura');
+  /// Informativo não notifica nem muda a situação da estufa.
+  bool get isInfo => severity == 'info';
+  /// "Umidade alta" guarda o bulbo úmido estimado, que é uma temperatura.
+  bool get isTemperature => type.startsWith('Temperatura') || type == 'Umidade alta';
   bool get isHigh => type.endsWith('alta');
 }
 

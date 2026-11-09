@@ -41,6 +41,13 @@ class CuringUnit(Base):
     temperature_output_confirmed = Column(Boolean, nullable=True)
     outputs_confirmed_at = Column(DateTime, nullable=True)
 
+    # Estado dos alertas. A âncora é o início do trecho atual (fase ou retomada) já tratado pelo motor.
+    alert_anchor_at = Column(DateTime, nullable=True)
+    alert_grace_until = Column(DateTime, nullable=True)
+    # Referência (°C) do alerta de queda; nula enquanto a queda é a correção pedida por outro alerta.
+    drop_reference = Column(Float, nullable=True)
+    wet_bulb_gate_open = Column(Boolean, nullable=False, default=True)
+
     user = relationship("User", back_populates="curing_units")
     device = relationship("Device", back_populates="curing_units")
     readings = relationship("Reading", back_populates="curing_unit")

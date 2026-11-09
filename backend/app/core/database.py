@@ -225,6 +225,14 @@ def initialize_database(target_engine=None) -> None:
                 "WHERE temperature_output_trigger = 'temperature_out'"
             ))
         add_column("output_events", "metric", "VARCHAR(20)")
+        add_column("readings", "filtered_temperature", "FLOAT")
+        add_column("readings", "filtered_humidity", "FLOAT")
+        add_column("readings", "filtered_wet_bulb", "FLOAT")
+        add_column("readings", "is_outlier", "BOOLEAN NOT NULL DEFAULT 0")
+        add_column("curing_units", "alert_anchor_at", "DATETIME")
+        add_column("curing_units", "alert_grace_until", "DATETIME")
+        add_column("curing_units", "drop_reference", "FLOAT")
+        add_column("curing_units", "wet_bulb_gate_open", "BOOLEAN NOT NULL DEFAULT 1")
 
         # A cura passou a ter quatro fases (Amarelação, Murchamento, Secagem da folha e do talo).
         for old, new in (("Início da secagem", "Amarelação"), ("Amarelecimento", "Amarelação"), ("Murcha", "Murchamento")):
@@ -238,7 +246,7 @@ def initialize_database(target_engine=None) -> None:
         # Tipos de alerta que as regras das fases não usam mais: sem isso ficariam abertos para sempre.
         connection.execute(text(
             "UPDATE alerts SET is_active = 0, resolved_at = CURRENT_TIMESTAMP "
-            "WHERE is_active = 1 AND type IN ('Temperatura baixa', 'Umidade alta')"
+            "WHERE is_active = 1 AND type = 'Temperatura baixa'"
         ))
         # Secagens em andamento antes do histórico de fases: começa um trecho com a fase atual.
         connection.execute(text(

@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from conftest import add_past_readings, send_reading, set_stage, shift_stage_start
+from conftest import Sim, add_past_readings, send_reading, set_stage, shift_stage_start
 from core.clock import utcnow
 from core.database import SessionLocal
 from models.curing_unit import CuringUnit
@@ -88,56 +88,43 @@ def test_yellowing_alarm_needs_ten_minutes(client, auth, drying_unit):
     send_reading(client, 41.0, 85.0)
     alert = active_alerts(client, auth)["Temperatura alta"]
     assert alert["severity"] == "warning"
-    assert alert["message"].endswith("na fase de Amarelação por 10 min.")
+    assert "na fase de Amarelação por 10 min." in alert["message"]
 
 
-def test_a_reading_inside_the_window_cancels_the_sustained_alarm(client, auth, drying_unit):
+def test_one_normal_reading_does_not_cancel_the_alarm(client, auth, drying_unit):
     unit_id = drying_unit["unit"]["id"]
-    add_past_readings(unit_id, range(6, 12), temperature=43.0)
+    add_past_readings(unit_id, range(6, 12), temperature=41.0)
     add_past_readings(unit_id, range(5, 6), temperature=39.0)
-    add_past_readings(unit_id, range(1, 5), temperature=43.0)
-    send_reading(client, 43.0, 85.0)
-    assert "Temperatura alta" not in active_alerts(client, auth)
-
-
-def test_yellowing_humidity_becomes_critical(client, auth, drying_unit):
-    add_past_readings(drying_unit["unit"]["id"], range(1, 17), temperature=38.0, humidity=68.0)
-    send_reading(client, 38.0, 68.0)
-    assert active_alerts(client, auth)["Umidade baixa"]["severity"] == "critical"
+    add_past_readings(unit_id, range(1, 5), temperature=41.0)
+    send_reading(client, 41.0, 85.0)
+    assert active_alerts(client, auth)["Temperatura alta"]["severity"] == "warning"
 
 
 def test_stem_drying_has_an_emergency_level(client, auth, drying_unit):
-    set_stage(client, auth, drying_unit["unit"]["id"], "Secagem do talo")
-    send_reading(client, 81.0, 20.0)
+    sim = Sim(drying_unit["unit"]["id"], "Secagem do talo")
+    sim.run(3, 81.0, 20.0)
     assert active_alerts(client, auth)["Temperatura alta"]["severity"] == "emergency"
 
 
 def test_fast_heating_is_reported_in_wilting(client, auth, drying_unit):
-    unit_id = drying_unit["unit"]["id"]
-    set_stage(client, auth, unit_id, "Murchamento")
-    add_past_readings(unit_id, range(31, 35), temperature=42.0, humidity=75.0)
-    add_past_readings(unit_id, range(1, 5), temperature=44.0, humidity=75.0)
-    send_reading(client, 44.0, 75.0)
+    sim = Sim(drying_unit["unit"]["id"], "Murchamento")
+    sim.run(75, lambda minute: 42 + 2 * minute / 60, 70.0)
     alert = active_alerts(client, auth)["Aquecimento rápido"]
-    assert alert["severity"] == "warning"
+    # Fica como informativo até medir a oscilação real da fornalha.
+    assert alert["severity"] == "info"
     assert alert["value"] is None
-    # Mensagem em °F, como o resto da interface (limite de 1,5 °C/h = 2,7 °F/h).
-    assert alert["message"].endswith("Máximo: 2,7 °F/h.")
-
-    # Na Secagem do talo não há limite de aquecimento: o alerta fecha.
-    set_stage(client, auth, unit_id, "Secagem do talo")
-    send_reading(client, 62.0, 30.0)
-    assert "Aquecimento rápido" not in active_alerts(client, auth)
+    # Mensagem em °F, como o resto da interface (limite de 0,8 °C/h = 1,4 °F/h).
+    assert "Máximo: 1,4 °F/h." in alert["message"]
 
 
 def test_below_range_waits_for_the_warm_up(client, auth, drying_unit):
-    unit_id = drying_unit["unit"]["id"]
-    add_past_readings(unit_id, range(1, 32), temperature=30.0)
-    send_reading(client, 30.0, 85.0)
+    sim = Sim(drying_unit["unit"]["id"], "Amarelação")
+    # A carência é de 12 h mais a subida desde a temperatura inicial: (33 − 30) ÷ 1,1 ≈ 2,7 h.
+    sim.run(40, 30.0, 85.0)
     assert "Temperatura abaixo da faixa" not in active_alerts(client, auth)
 
-    shift_stage_start(unit_id, hours=7)
-    send_reading(client, 30.0, 85.0)
+    sim.skip(15 * 60)
+    sim.run(35, 30.0, 85.0)
     alert = active_alerts(client, auth)["Temperatura abaixo da faixa"]
     assert alert["threshold"] == 33
 
@@ -146,8 +133,8 @@ def test_missing_readings_raise_and_clear_the_alarm(client, auth, drying_unit):
     send_reading(client, 38.0, 85.0)
     with SessionLocal() as db:
         check_missing_readings(db, utcnow() + timedelta(minutes=2))
-    alert = active_alerts(client, auth)["Sem novas leituras"]
-    assert alert["severity"] == "warning"
+    # Os 90 s viraram só o indicador "Sem sinal"; na Amarelação o alarme é crítico aos 5 min.
+    assert "Sem novas leituras" not in active_alerts(client, auth)
 
     with SessionLocal() as db:
         check_missing_readings(db, utcnow() + timedelta(minutes=6))
@@ -171,9 +158,13 @@ def test_missing_readings_alarm_closes_when_drying_stops(client, auth, drying_un
 def test_ready_to_advance_after_time_and_conditions(client, auth, drying_unit):
     unit_id = drying_unit["unit"]["id"]
     shift_stage_start(unit_id, hours=25)
-    # Umidade caindo: 92% entre 4 h e 2 h atrás, 86% nas últimas 2 h.
-    add_past_readings(unit_id, range(130, 240, 10), temperature=37.0, humidity=92.0)
-    add_past_readings(unit_id, range(1, 110, 10), temperature=38.5, humidity=86.0)
+    add_past_readings(unit_id, range(1, 11), temperature=38.5, humidity=86.0)
+    send_reading(client, 38.5, 86.0)
+    phase = client.get(f"/curing_units/{unit_id}", headers=auth).json()["phase"]
+    # As 25 h não bastam mais: o mínimo para sugerir a próxima fase é 48 h.
+    assert phase["ready"] is False
+
+    shift_stage_start(unit_id, hours=24)
     send_reading(client, 38.5, 86.0)
 
     phase = client.get(f"/curing_units/{unit_id}", headers=auth).json()["phase"]
@@ -220,8 +211,7 @@ def test_paused_time_does_not_count_and_drying_resumes(client, auth, drying_unit
 
 def test_new_batch_starts_over_and_closes_old_alerts(client, auth, drying_unit):
     unit_id = drying_unit["unit"]["id"]
-    set_stage(client, auth, unit_id, "Murchamento")
-    send_reading(client, 53.0, 70.0)
+    Sim(unit_id, "Murchamento").run(3, 53.0, 40.0)
     assert "Temperatura alta" in active_alerts(client, auth)
     _pass_time(unit_id, 8)
     client.post(f"/curing_units/{unit_id}/stop-drying", headers=auth)

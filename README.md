@@ -68,12 +68,18 @@ flowchart LR
 - Sinal LoRa (RSSI/SNR) e estado online/offline de cada sensor.
 
 ### Alertas
-- Regras de cada fase da cura, com níveis de atenção, crítico e emergência (ex.: na Amarelação, acima de 40 °C por 10 min é atenção e acima de 42 °C por 10 min é crítico).
-- Aquecimento rápido (mais de 1,5 °C por hora em 30 min) no Murchamento e na Secagem da folha.
-- Temperatura abaixo da faixa da fase, depois do aquecimento inicial.
-- Estufa sem novas leituras: atenção após 90 s e crítico após 5 min (sensor, gateway ou Wi-Fi).
-- Um alerta por tipo, sem repetição; ao piorar, abre um novo alerta mais grave e notifica de novo.
-- Fechamento automático quando o valor volta para a faixa, com margem para não ficar abrindo e fechando. Reconhecer e resolver pelo app.
+- Regras de cada fase da cura, com níveis de atenção, crítico e emergência (ex.: na Amarelação, acima de 40 °C por 10 min é atenção; no Murchamento, acima de 47,8 °C por 2 min).
+- Os alertas usam a mediana dos últimos 30 s, descartam saltos da medição e exigem 80 % das amostras da janela. Uma leitura isolada não abre alerta.
+- **Umidade alta**: bulbo úmido estimado acima de 40,6 °C no Murchamento e na Secagem da folha (até 57,2 °C), o principal risco de escaldadura.
+- **Ar seco na Amarelação**: diferença entre bulbo seco e úmido acima de 4,4 °C por 15 min, depois da carência inicial.
+- **Temperatura em queda**: 2,8 °C abaixo do máximo alcançado na fase, mesmo em queda lenta. Não dispara quando a redução foi pedida por outro alerta.
+- **Temperatura abaixo da faixa**: 2 °C abaixo do mínimo da fase por 30 min, depois de uma carência calculada a partir da temperatura inicial.
+- **Aquecimento rápido** com limite por fase, por enquanto só informativo, até medir a oscilação real da fornalha.
+- **Sensor suspeito**: valores congelados, saltos repetidos ou umidade em 99 % ou mais por 30 min.
+- **Sem novas leituras**: crítico aos 5 min na Amarelação; nas outras fases, atenção aos 5 min e crítico aos 30 min. Antes disso, a interface mostra "Sem sinal".
+- Informativos (ar seco no Murchamento, permanência longa na fase e aquecimento rápido) aparecem na lista, sem notificar e sem mudar a situação da estufa.
+- Um alerta por tipo, sem repetição; ao piorar, abre um novo alerta mais grave e notifica de novo; ao melhorar, o mesmo alerta é rebaixado, sem notificar.
+- Fechamento automático quando o valor volta para a faixa e se mantém por 2 min, com margem para não ficar abrindo e fechando. Reconhecer e resolver pelo app.
 
 ### Controle das saídas (relés)
 - Dois relés no sender: **Flap** (relé 1, GPIO2) e **Ventoinha** (relé 2, GPIO3), com nome editável.
@@ -278,8 +284,10 @@ Variáveis de `backend/.env` (todas opcionais):
 | `REFRESH_TOKEN_DAYS` | `30` | Validade da sessão. |
 | `GATEWAY_API_KEY` | vazio | Quando definida, o gateway precisa enviar `X-API-Key` com o mesmo valor (`GATEWAY_API_KEY` no `receiver.ino`). |
 | `CORS_ORIGINS` | `*` | Origens liberadas para o navegador, separadas por vírgula. |
-| `DEVICE_OFFLINE_SECONDS` | `90` | Tempo sem leituras até o sensor aparecer como offline e o alerta "Sensor sem resposta". |
-| `NO_READINGS_ALARM_SECONDS` | `300` | Tempo sem leituras, com a secagem ligada, até o alarme crítico "Estufa sem novas leituras". |
+| `DEVICE_OFFLINE_SECONDS` | `90` | Tempo sem leituras até o sensor aparecer como offline ("Sem sinal"). |
+| `ATMOSPHERIC_PRESSURE_KPA` | `90.8` | Pressão usada para estimar o bulbo úmido (padrão: Lages, 916 m). |
+| `HEATING_RATE_WINDOW_MINUTES` | `60` | Janela da regressão do alerta de aquecimento rápido. |
+| `HEATING_RATE_SEVERITY` | `info` | Gravidade do aquecimento rápido. Fica `info` até medir a oscilação real da fornalha. |
 | `MDNS_ENABLED` | `true` | Anuncia a API na rede local para o gateway e o app. |
 | `API_PORT` | `8000` | Porta informada no anúncio mDNS. Mude junto com `--port`. |
 | `DATA_DIR` | `backend/data` | Pasta do banco SQLite e da chave secreta. |

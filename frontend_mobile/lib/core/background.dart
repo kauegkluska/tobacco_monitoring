@@ -77,7 +77,7 @@ class _MonitorTaskHandler extends TaskHandler {
 
       final newEvents = after == null ? const <OutputEvent>[] : events.where((event) => event.buzzer).toList();
       final lastAlert = _lastAlertId;
-      final newAlerts = lastAlert == null ? const <AlertItem>[] : alerts.where((alert) => alert.id > lastAlert).toList();
+      final newAlerts = lastAlert == null ? const <AlertItem>[] : alerts.where((alert) => alert.id > lastAlert && !alert.isInfo).toList();
       _lastEventId = events.fold<int>(after ?? 0, (value, event) => math.max(value, event.id));
       _lastAlertId = alerts.fold<int>(lastAlert ?? 0, (value, alert) => math.max(value, alert.id));
 
@@ -99,7 +99,7 @@ class _MonitorTaskHandler extends TaskHandler {
         }
       }
 
-      final count = alerts.length;
+      final count = alerts.where((alert) => !alert.isInfo).length;
       FlutterForegroundTask.updateService(
         notificationTitle: count == 0 ? 'Estufa monitorada' : f.plural(count, 'alerta ativo', 'alertas ativos'),
         notificationText: 'Última verificação às ${f.time(DateTime.now())}. Avisos chegam mesmo com o app fechado.',

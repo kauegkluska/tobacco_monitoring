@@ -1,13 +1,26 @@
 """Fases da cura do tabaco: faixas de referência, alarmes e condições para avançar.
 
-O SHT40 mede temperatura e umidade relativa, não bulbo úmido. Por isso os limites de umidade
-relativa são usados como parâmetros indiretos de monitoramento.
+O SHT40 mede temperatura e umidade relativa. O bulbo úmido, que é o que a literatura de cura controla, é estimado
+a partir delas (services/psychrometrics.py). "DE" marca decisão de engenharia, a calibrar em campo.
 """
 
+import math
 from dataclasses import dataclass
 
 NOT_STARTED = "Não iniciado"
 FINISHED = "Finalizado"
+
+TEMPERATURE_HIGH_TYPE = "Temperatura alta"
+# Calor com umidade alta, medido pelo bulbo úmido estimado: principal causa de escaldadura e escurecimento.
+WET_BULB_HIGH_TYPE = "Umidade alta"
+DEPRESSION_HIGH_TYPE = "Ar seco na Amarelação"
+HUMIDITY_LOW_TYPE = "Umidade baixa"
+BELOW_RANGE_TYPE = "Temperatura abaixo da faixa"
+DROP_TYPE = "Temperatura em queda"
+HEATING_TYPE = "Aquecimento rápido"
+NO_READINGS_TYPE = "Sem novas leituras"
+SENSOR_TYPE = "Sensor suspeito"
+OVERDUE_TYPE = "Permanência longa"
 
 
 @dataclass(frozen=True)
@@ -15,8 +28,8 @@ class Tier:
     """Nível de um alarme: valor-limite, gravidade e por quanto tempo precisa durar."""
 
     threshold: float
-    severity: str  # "warning", "critical" ou "emergency"
-    sustain_minutes: int = 0
+    severity: str  # "info", "warning", "critical" ou "emergency"
+    sustain_minutes: int
 
 
 @dataclass(frozen=True)
@@ -24,7 +37,7 @@ class Rule:
     """Um alarme por tipo; os níveis vão do mais leve ao mais grave."""
 
     type: str
-    metric: str  # "temperature" ou "humidity"
+    metric: str  # "temperature", "humidity", "wet_bulb" ou "depression"
     direction: str  # "high" ou "low"
     tiers: tuple[Tier, ...]
 
@@ -33,89 +46,101 @@ class Rule:
 class Phase:
     key: str
     name: str
+    # Faixas exibidas e usadas pelos relés.
     temp_min: float
     temp_max: float
     humidity_min: float
     humidity_max: float
+    # Mínimo para sugerir o avanço (nunca bloqueia a confirmação) e máximo de referência para o aviso informativo.
     min_hours: float
     max_hours: float
     rules: tuple[Rule, ...]
-    # Aquecimento máximo permitido (°C/h), medido em 30 min. None: não avaliado nesta fase.
-    heating_limit: float | None
-    # Condições automáticas para sugerir a próxima fase (além de min_hours).
-    advance_temp_at_least: float | None
-    advance_humidity_at_most: float | None
-    advance_humidity_falling: bool
+    # Aquecimento máximo permitido (°C/h).
+    heating_limit: float
+    # Condição de temperatura para sugerir a próxima fase (além de min_hours) e janela da média.
+    advance_temp_at_least: float
+    advance_temp_minutes: int
     # O que o produtor precisa confirmar olhando as folhas antes de avançar.
     visual_check: str
-    # Horas depois do início da fase em que "abaixo da faixa" ainda é esperado (estufa aquecendo).
-    warmup_hours: float
+    # Teto da referência do alerta de queda.
+    alert_temp_max: float
+    # Horas iniciais da fase em que a queda é crítica; depois vira atenção.
+    drop_critical_hours: float
+    # Sem leituras: segundos até atenção (None: vai direto ao crítico) e até crítico.
+    no_readings_warning_seconds: int | None
+    no_readings_critical_seconds: int
 
 
-def _temperature_high(*tiers: Tier) -> Rule:
-    return Rule("Temperatura alta", "temperature", "high", tiers)
+def _temperature_high(warning: float, critical: float, minutes: int, emergency: float | None = None) -> Rule:
+    tiers = (Tier(warning, "warning", minutes), Tier(critical, "critical", minutes))
+    if emergency is not None:
+        tiers += (Tier(emergency, "emergency", minutes),)
+    return Rule(TEMPERATURE_HIGH_TYPE, "temperature", "high", tiers)
 
 
-def _humidity_low(*tiers: Tier) -> Rule:
-    return Rule("Umidade baixa", "humidity", "low", tiers)
-
+# O manual Powell mantém o úmido em até 41,1 °C; adotou-se 40,6 °C (105 °F) por NC State, Virginia Tech e a fonte
+# brasileira. Crítico a 43 °C: 2 °C abaixo dos ~45 °C em que a folha úmida morre, cobrindo a incerteza da estimativa.
+_WET_BULB_HIGH = Rule(WET_BULB_HIGH_TYPE, "wet_bulb", "high", (Tier(40.6, "warning", 2), Tier(43.0, "critical", 2)))
 
 PHASES: tuple[Phase, ...] = (
     Phase(
         key="amarelacao",
         name="Amarelação",
         temp_min=35, temp_max=40, humidity_min=80, humidity_max=95,
-        min_hours=24, max_hours=48,
+        min_hours=48, max_hours=60,
         rules=(
-            _temperature_high(Tier(40, "warning", 10), Tier(42, "critical", 10)),
-            _humidity_low(Tier(75, "warning", 15), Tier(70, "critical", 15)),
+            _temperature_high(40, 42, 10),
+            Rule(DEPRESSION_HIGH_TYPE, "depression", "high", (Tier(4.4, "warning", 15),)),
         ),
-        heating_limit=None,
-        advance_temp_at_least=38, advance_humidity_at_most=None, advance_humidity_falling=True,
+        heating_limit=1.1,
+        advance_temp_at_least=38, advance_temp_minutes=10,
         visual_check="Folhas amarelas e começando a murchar.",
-        warmup_hours=6,
+        alert_temp_max=40,
+        drop_critical_hours=math.inf,
+        no_readings_warning_seconds=None, no_readings_critical_seconds=300,
     ),
     Phase(
         key="murchamento",
         name="Murchamento",
         temp_min=40, temp_max=48, humidity_min=65, humidity_max=85,
-        min_hours=12, max_hours=24,
+        min_hours=18, max_hours=24,
         rules=(
-            _temperature_high(Tier(50, "warning"), Tier(52, "critical")),
-            _humidity_low(Tier(60, "warning")),
+            _temperature_high(47.8, 52, 2),
+            _WET_BULB_HIGH,
+            Rule(HUMIDITY_LOW_TYPE, "humidity", "low", (Tier(60, "info", 15),)),
         ),
-        heating_limit=1.5,
-        advance_temp_at_least=46, advance_humidity_at_most=None, advance_humidity_falling=False,
+        heating_limit=0.8,
+        advance_temp_at_least=46, advance_temp_minutes=10,
         visual_check="Folhas completamente murchas, moles ao toque.",
-        warmup_hours=3,
+        alert_temp_max=48,
+        drop_critical_hours=0,
+        no_readings_warning_seconds=300, no_readings_critical_seconds=1800,
     ),
     Phase(
         key="secagem_folha",
         name="Secagem da folha",
         temp_min=48, temp_max=60, humidity_min=30, humidity_max=65,
-        min_hours=24, max_hours=48,
-        rules=(
-            _temperature_high(Tier(60, "warning"), Tier(63, "critical")),
-            _humidity_low(Tier(25, "warning")),
-        ),
-        heating_limit=1.5,
-        advance_temp_at_least=55, advance_humidity_at_most=40, advance_humidity_falling=False,
+        min_hours=24, max_hours=60,
+        rules=(_temperature_high(57.2, 63, 2), _WET_BULB_HIGH),
+        heating_limit=1.1,
+        advance_temp_at_least=54.4, advance_temp_minutes=60,
         visual_check="Lâmina seca e quebradiça; só o talo ainda úmido.",
-        warmup_hours=3,
+        alert_temp_max=57.2,
+        drop_critical_hours=0,
+        no_readings_warning_seconds=300, no_readings_critical_seconds=1800,
     ),
     Phase(
         key="secagem_talo",
         name="Secagem do talo",
         temp_min=60, temp_max=74, humidity_min=15, humidity_max=40,
-        min_hours=24, max_hours=48,
-        rules=(
-            _temperature_high(Tier(74, "warning"), Tier(76, "critical"), Tier(80, "emergency")),
-            _humidity_low(Tier(10, "warning")),
-        ),
-        heating_limit=None,
-        advance_temp_at_least=70, advance_humidity_at_most=None, advance_humidity_falling=False,
+        min_hours=18, max_hours=48,
+        rules=(_temperature_high(74, 77, 2, emergency=80),),
+        heating_limit=1.7,
+        advance_temp_at_least=70, advance_temp_minutes=10,
         visual_check="Talo seco: quebra ao dobrar.",
-        warmup_hours=3,
+        alert_temp_max=74,
+        drop_critical_hours=12,
+        no_readings_warning_seconds=300, no_readings_critical_seconds=1800,
     ),
 )
 
@@ -129,12 +154,9 @@ LEGACY_STAGES = {
     "Murcha": "Murchamento",
 }
 
-# Abaixo da faixa da fase, depois do aquecimento: vale em todas as fases.
-BELOW_RANGE_TYPE = "Temperatura abaixo da faixa"
+# Abaixo da faixa da fase, depois da carência: vale em todas as fases.
 BELOW_RANGE_MARGIN_C = 2.0
 BELOW_RANGE_SUSTAIN_MINUTES = 30
-HEATING_TYPE = "Aquecimento rápido"
-NO_READINGS_TYPE = "Sem novas leituras"
 
 SEVERITY_RANK = {"info": 0, "warning": 1, "critical": 2, "emergency": 3}
 

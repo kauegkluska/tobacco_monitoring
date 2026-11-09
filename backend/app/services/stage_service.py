@@ -11,12 +11,6 @@ from models.reading import Reading
 from models.stage_change import StageChange
 from services.phases import PHASES, current_phase, next_stage, phase_index
 
-# Janela da média usada para conferir temperatura e umidade antes de avançar.
-RECENT_MINUTES = 10
-# Umidade "em queda": média das últimas 2 h abaixo da média das 2 h anteriores, por esta margem.
-HUMIDITY_TREND_HOURS = 2
-HUMIDITY_TREND_DROP = 2.0
-
 
 def _open_segment(unit: CuringUnit) -> StageChange | None:
     return next((change for change in unit.stage_changes if change.ended_at is None), None)
@@ -94,39 +88,24 @@ def phase_status(unit: CuringUnit, now: datetime | None = None) -> dict | None:
     now = now or utcnow()
     db = object_session(unit)
     hours = stage_hours(unit, now)
-    recent = now - timedelta(minutes=RECENT_MINUTES)
+    recent = now - timedelta(minutes=phase.advance_temp_minutes)
     temperature = _average(db, unit, Reading.temperature, recent, now) if db else None
-    humidity = _average(db, unit, Reading.humidity, recent, now) if db else None
+    target = phase.advance_temp_at_least
+    held = " por 1 h" if phase.advance_temp_minutes >= 60 else ""
 
-    checks = [{
-        "label": f"Pelo menos {phase.min_hours:g} h nesta fase",
-        "ok": hours >= phase.min_hours,
-    }]
-    if phase.advance_temp_at_least is not None:
-        target = phase.advance_temp_at_least
-        checks.append({
-            "label": f"Temperatura em {_br(_fahrenheit(target), 0)} °F ou mais",
+    checks = [
+        {
+            "label": f"Pelo menos {phase.min_hours:g} h nesta fase",
+            "ok": hours >= phase.min_hours,
+        },
+        {
+            "label": f"Temperatura em {_br(_fahrenheit(target), 0)} °F ou mais{held}",
             "ok": temperature is not None and temperature >= target,
             # O app usa metric/target para mostrar o alvo na unidade escolhida.
             "metric": "temperature",
             "target": target,
-        })
-    if phase.advance_humidity_at_most is not None:
-        target = phase.advance_humidity_at_most
-        checks.append({
-            "label": f"Umidade em {_br(target, 0)}% ou menos",
-            "ok": humidity is not None and humidity <= target,
-            "metric": "humidity",
-            "target": target,
-        })
-    if phase.advance_humidity_falling:
-        window = timedelta(hours=HUMIDITY_TREND_HOURS)
-        latest = _average(db, unit, Reading.humidity, now - window, now) if db else None
-        earlier = _average(db, unit, Reading.humidity, now - 2 * window, now - window) if db else None
-        checks.append({
-            "label": "Umidade em queda nas últimas 2 h",
-            "ok": latest is not None and earlier is not None and latest <= earlier - HUMIDITY_TREND_DROP,
-        })
+        },
+    ]
 
     return {
         "key": phase.key,

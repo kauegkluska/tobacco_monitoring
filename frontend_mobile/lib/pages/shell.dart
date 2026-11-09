@@ -124,7 +124,7 @@ class _HomeShellState extends State<HomeShell> {
     badgeTimer?.cancel();
     try {
       final alerts = await AppScope.of(context).api.get('/alerts/?active=true&limit=1000') as List;
-      _setAlertCount(alerts.length);
+      _setAlertCount(alerts.where((alert) => !alert.isInfo).length);
     } catch (_) {
       // O indicador de conexão já mostra a falha.
     } finally {

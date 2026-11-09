@@ -555,7 +555,7 @@ class _UnitPageState extends State<UnitPage> {
       unit: current,
       device: device,
       latest: latest,
-      activeAlerts: alerts.length,
+      activeAlerts: alerts.where((alert) => !alert.isInfo).length,
       criticalAlerts: alerts.where((alert) => alert.isCritical).length,
     );
     final phase = current.phase;

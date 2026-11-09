@@ -17,7 +17,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
 from fastapi.testclient import TestClient  # noqa: E402
 
 from core.database import Base, engine  # noqa: E402
+import main as main_module  # noqa: E402
 from main import app  # noqa: E402
+
+# O verificador de leituras em segundo plano usa o relógio real; os testes o chamam com o tempo que escolherem.
+main_module.MISSING_READINGS_CHECK_SECONDS = 86400
 
 
 @pytest.fixture()
@@ -45,6 +49,11 @@ def drying_unit(client, auth):
     unit = client.post("/curing_units/", json={"name": "Estufa 01", "device_id": device["id"]}, headers=auth).json()
     client.post(f"/curing_units/{unit['id']}/start-drying", headers=auth)
     return {"device": device, "unit": unit}
+
+
+def make_unit(client: TestClient, auth: dict) -> int:
+    """Estufa sem dispositivo, para testes que gravam direto no banco."""
+    return client.post("/curing_units/", json={"name": "Estufa de teste"}, headers=auth).json()["id"]
 
 
 def send_reading(client: TestClient, temperature: float = 40.0, humidity: float = 60.0, **extra):
@@ -76,6 +85,124 @@ def add_past_readings(unit_id: int, minutes_ago: range, temperature: float, humi
                 curing_unit_id=unit_id,
             ))
         db.commit()
+
+
+class Sim:
+    """Cura simulada: alimenta o motor com leituras de horários escolhidos, sem esperar o tempo real."""
+
+    def __init__(self, unit_id: int, stage: str = "Amarelação", start=None):
+        from datetime import datetime
+
+        from core.database import SessionLocal
+        from models.curing_unit import CuringUnit
+        from models.stage_change import StageChange
+
+        self.unit_id = unit_id
+        self.now = start or datetime(2026, 1, 10, 8, 0, 0)
+        with SessionLocal() as db:
+            unit = db.get(CuringUnit, unit_id)
+            unit.curing_stage = stage
+            unit.stage_started_at = unit.drying_started_at = unit.cycle_started_at = self.now
+            unit.stage_changes.clear()
+            unit.stage_changes.append(StageChange(stage=stage, started_at=self.now))
+            db.commit()
+
+    def skip(self, minutes: float) -> None:
+        from datetime import timedelta
+
+        self.now += timedelta(minutes=minutes)
+
+    def run(self, minutes: float, temperature, humidity, step: float = 15, noise: bool = True) -> None:
+        """Leituras a cada `step` segundos. `temperature` e `humidity` podem ser funções dos minutos decorridos."""
+        from datetime import timedelta
+
+        from core.database import SessionLocal
+        from models.curing_unit import CuringUnit
+        from models.reading import Reading
+        from services.alert_engine import evaluate_reading
+
+        value = lambda source, elapsed: source(elapsed) if callable(source) else source  # noqa: E731
+        with SessionLocal() as db:
+            unit = db.get(CuringUnit, self.unit_id)
+            for index in range(1, int(minutes * 60 / step) + 1):
+                self.now += timedelta(seconds=step)
+                elapsed = index * step / 60
+                # Um sensor real nunca repete exatamente o mesmo valor por minutos seguidos.
+                wiggle = 0.02 if noise and index % 2 else 0.0
+                reading = Reading(
+                    temperature=value(temperature, elapsed) + wiggle,
+                    humidity=value(humidity, elapsed) + wiggle,
+                    timestamp=self.now,
+                    curing_unit_id=self.unit_id,
+                )
+                db.add(reading)
+                db.flush()
+                evaluate_reading(db, unit, None, reading)
+            db.commit()
+
+    def change_stage(self, stage: str) -> None:
+        from core.database import SessionLocal
+        from models.curing_unit import CuringUnit
+        from services.stage_service import change_stage
+
+        with SessionLocal() as db:
+            change_stage(db.get(CuringUnit, self.unit_id), stage, self.now)
+            db.commit()
+
+    def pause(self) -> None:
+        from core.database import SessionLocal
+        from models.curing_unit import CuringUnit
+        from services.stage_service import close_segment
+
+        with SessionLocal() as db:
+            unit = db.get(CuringUnit, self.unit_id)
+            close_segment(unit, self.now)
+            unit.drying_started_at = None
+            db.commit()
+
+    def resume(self) -> None:
+        from core.database import SessionLocal
+        from models.curing_unit import CuringUnit
+        from services.stage_service import open_segment
+
+        with SessionLocal() as db:
+            unit = db.get(CuringUnit, self.unit_id)
+            unit.drying_started_at = self.now
+            open_segment(unit, self.now)
+            db.commit()
+
+    def check_missing(self) -> None:
+        from core.database import SessionLocal
+        from services.alert_engine import check_missing_readings
+
+        with SessionLocal() as db:
+            check_missing_readings(db, self.now)
+
+    def _alerts(self, *conditions):
+        from core.database import SessionLocal
+        from models.alert import Alert
+
+        with SessionLocal() as db:
+            rows = db.query(Alert).filter(Alert.curing_unit_id == self.unit_id, *conditions).order_by(Alert.id).all()
+            db.expunge_all()
+            return rows
+
+    def active(self) -> dict:
+        from models.alert import Alert
+
+        return {alert.type: alert for alert in self._alerts(Alert.is_active.is_(True))}
+
+    def all_alerts(self) -> list:
+        return self._alerts()
+
+    def unit(self):
+        from core.database import SessionLocal
+        from models.curing_unit import CuringUnit
+
+        with SessionLocal() as db:
+            unit = db.get(CuringUnit, self.unit_id)
+            db.expunge(unit)
+            return unit
 
 
 def shift_stage_start(unit_id: int, hours: float) -> None:

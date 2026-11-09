@@ -59,7 +59,7 @@ async function refreshAlertCount() {
   clearTimeout(badgeTimer);
   try {
     const alerts = await api.get("/alerts/?active=true&limit=1000");
-    setAlertCount(alerts.length);
+    setAlertCount(alerts.filter((alert) => alert.severity !== "info").length);
   } catch (_) {
     // O indicador de conexão já mostra a falha.
   } finally {

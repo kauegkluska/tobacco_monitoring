@@ -133,6 +133,6 @@ def serialize_cycle(db: Session, cycle: CuringCycle) -> dict:
         "drying_hours": sum(item["hours"] for item in phases),
         "phases": phases,
         "stats": _stats(db, unit, start, end),
-        "alerts": alerts.count(),
+        "alerts": alerts.filter(Alert.severity != "info").count(),
         "critical_alerts": alerts.filter(Alert.severity.in_(("critical", "emergency"))).count(),
     }

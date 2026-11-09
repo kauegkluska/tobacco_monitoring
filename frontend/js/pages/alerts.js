@@ -24,7 +24,7 @@ export function renderAlerts(ctx) {
       if (destroyed) return;
       state.alerts = alerts;
       state.units = units;
-      ctx.setAlertCount(alerts.filter((alert) => alert.is_active).length);
+      ctx.setAlertCount(alerts.filter((alert) => alert.is_active && alert.severity !== "info").length);
       if (!document.querySelector("dialog[open]") && !root.contains(document.activeElement?.closest("select"))) draw();
     } catch (error) {
       if (destroyed) return;

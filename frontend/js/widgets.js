@@ -159,7 +159,8 @@ export async function resolveAlert(target, alert) {
 export function alertCard(alert, { onChange, showUnit = true } = {}) {
   const tone = !alert.is_active ? "is-resolved" : isSevere(alert) ? "is-critical" : "is-warning";
   const status = !alert.is_active ? "Resolvido" : alert.acknowledged_at ? `${severityLabel(alert)} · reconhecido` : severityLabel(alert);
-  const isTemp = alert.type.startsWith("Temperatura");
+  // "Umidade alta" guarda o bulbo úmido estimado, que é uma temperatura.
+  const isTemp = alert.type.startsWith("Temperatura") || alert.type === "Umidade alta";
   const value = (v) => (v === null || v === undefined ? "--" : isTemp ? f.temp(v) : f.humidity(v));
   const hasValues = alert.value !== null && alert.value !== undefined && alert.threshold !== null && alert.threshold !== undefined;
   const unitName = alert.curing_unit_name || `Estufa ${alert.curing_unit_id}`;

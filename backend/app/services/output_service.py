@@ -7,8 +7,11 @@ from core.config import settings
 from models.curing_unit import CuringUnit
 from models.output_event import OutputEvent
 from models.reading import Reading
-from services.alert_engine import HUMIDITY_HYSTERESIS, TEMPERATURE_HYSTERESIS_C
 from services.phases import limits_for
+
+# Margem para o relé não ficar batendo; independente das margens dos alertas.
+TEMPERATURE_HYSTERESIS_C = 0.5
+HUMIDITY_HYSTERESIS = 1.0
 
 OUTPUT_MODES = ("auto", "on", "off")
 # "humidity" é o relé 1 do sender (GPIO2) e "temperature" o relé 2 (GPIO3).

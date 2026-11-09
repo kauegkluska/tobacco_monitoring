@@ -97,7 +97,7 @@ export function renderUnit(ctx) {
     const { unit, device, latest, alerts } = data;
     const limits = limitsFor(unit, device);
     const stale = isStale(latest, unit, device);
-    const status = unitStatus({ unit, device, latest, activeAlerts: alerts.length, criticalAlerts: alerts.filter(isSevere).length });
+    const status = unitStatus({ unit, device, latest, activeAlerts: alerts.filter((alert) => alert.severity !== "info").length, criticalAlerts: alerts.filter(isSevere).length });
 
     clear(
       root,

@@ -111,7 +111,8 @@ def get_curing_units(
     counts: dict[int, list[int]] = {}
     alert_rows = (
         db.query(Alert.curing_unit_id, Alert.severity, func.count(Alert.id))
-        .filter(Alert.curing_unit_id.in_(ids), Alert.is_active.is_(True))
+        # Informativo não muda a situação da estufa.
+        .filter(Alert.curing_unit_id.in_(ids), Alert.is_active.is_(True), Alert.severity != "info")
         .group_by(Alert.curing_unit_id, Alert.severity)
     )
     for unit_id, severity, count in alert_rows:

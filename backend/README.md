@@ -28,8 +28,10 @@ Copie `.env.example` para `.env` e ajuste. Tudo é opcional:
 | `SECRET_KEY` | Assina os tokens de login. Sem ela, uma chave aleatória é criada em `data/secret_key`. |
 | `GATEWAY_API_KEY` | Se definida, o gateway precisa enviar o header `X-API-Key` com o mesmo valor. |
 | `CORS_ORIGINS` | Origens liberadas para o navegador (`*` ou lista separada por vírgulas). |
-| `DEVICE_OFFLINE_SECONDS` | Segundos sem leitura até o dispositivo aparecer como offline e o alerta "Sensor sem resposta" (padrão 90). |
-| `NO_READINGS_ALARM_SECONDS` | Segundos sem leitura, com a secagem ligada, até o alarme crítico "Estufa sem novas leituras" (padrão 300). |
+| `DEVICE_OFFLINE_SECONDS` | Segundos sem leitura até o dispositivo aparecer como offline, o "Sem sinal" da interface (padrão 90). |
+| `ATMOSPHERIC_PRESSURE_KPA` | Pressão usada para estimar o bulbo úmido (padrão 90,8, Lages a 916 m). |
+| `HEATING_RATE_WINDOW_MINUTES` | Janela da regressão do aquecimento rápido (padrão 60). |
+| `HEATING_RATE_SEVERITY` | Gravidade do aquecimento rápido (padrão `info`, até medir a oscilação real da fornalha). |
 
 ## Descoberta na rede local
 
@@ -53,21 +55,25 @@ Ao iniciar a secagem, a estufa entra na **Amarelação**. As faixas e os alarmes
 
 | Fase | Faixa | Duração de referência | Alarmes |
 |---|---|---|---|
-| 1. Amarelação | 35–40 °C, 80–95% | 24–48 h | T > 40 °C por 10 min (atenção), T > 42 °C por 10 min (crítico), UR < 75% por 15 min (atenção), UR < 70% por 15 min (crítico) |
-| 2. Murchamento | 40–48 °C, 65–85% | 12–24 h | T > 50 °C (atenção), T > 52 °C (crítico), UR < 60% (atenção), aquecimento > 1,5 °C/h |
-| 3. Secagem da folha | 48–60 °C, 30–65% | 24–48 h | T > 60 °C (atenção), T > 63 °C (crítico), UR < 25% (atenção), aquecimento > 1,5 °C/h |
-| 4. Secagem do talo | 60–74 °C, 15–40% | 24–48 h | T > 74 °C (atenção), T > 76 °C (crítico), T > 80 °C (emergência), UR < 10% (atenção) |
+| 1. Amarelação | 35–40 °C, 80–95% | 48–60 h | T > 40 °C (atenção) ou > 42 °C (crítico) por 10 min; diferença entre bulbo seco e úmido > 4,4 °C por 15 min (atenção) |
+| 2. Murchamento | 40–48 °C, 65–85% | 18–24 h | T > 47,8 °C (atenção) ou > 52 °C (crítico) por 2 min; bulbo úmido > 40,6 °C (atenção) ou ≥ 43 °C (crítico) por 2 min; UR < 60% por 15 min (informativo) |
+| 3. Secagem da folha | 48–60 °C, 30–65% | 24–60 h | T > 57,2 °C (atenção) ou > 63 °C (crítico) por 2 min; bulbo úmido como no Murchamento, só com T até 57,2 °C |
+| 4. Secagem do talo | 60–74 °C, 15–40% | 18–48 h | T > 74 °C (atenção), > 77 °C (crítico) ou > 80 °C (emergência) por 2 min |
 
-Em todas as fases também há:
+A duração mínima só condiciona a sugestão de avanço; a máxima gera um informativo. Em todas as fases também há:
 
-- **Temperatura abaixo da faixa**: 2 °C abaixo do mínimo da fase por 30 min, depois do aquecimento inicial (6 h na Amarelação, 3 h nas outras).
-- **Sem novas leituras**: atenção após `DEVICE_OFFLINE_SECONDS` e crítico após `NO_READINGS_ALARM_SECONDS`, verificado a cada 30 s em segundo plano. O gateway só envia quando recebe pacotes do sender, então a API não consegue separar falha do sensor e falha do gateway.
+- **Temperatura abaixo da faixa**: 2 °C abaixo do mínimo da fase por 30 min, depois da carência. Na Amarelação ela vale 12 h mais a subida desde a temperatura inicial; nas outras fases e na retomada, a subida até o mínimo mais 1 h.
+- **Temperatura em queda**: 2,8 °C abaixo do máximo alcançado na fase, por 5 min. Não abre com "Temperatura alta" ou "Umidade alta" ativos, nem até 2 h depois de encerrados.
+- **Aquecimento rápido**: regressão da temperatura acima de 1,1 / 0,8 / 1,1 / 1,7 °C/h, conforme a fase.
+- **Sensor suspeito**: valores congelados por 10 min ou 3 saltos em 5 min suspendem as regras que dependem da medição; UR ≥ 99% por 30 min só avisa.
+- **Permanência longa**: informativo quando a fase passa da duração máxima.
+- **Sem novas leituras**: crítico aos 5 min na Amarelação; atenção aos 5 min e crítico aos 30 min nas demais fases, verificado a cada 30 s em segundo plano. O gateway só envia quando recebe pacotes do sender, então a API não consegue separar falha do sensor e falha do gateway.
 
 A troca de fase é confirmada pelo produtor (`POST /curing_units/{id}/advance-stage`), porque depende de olhar as folhas. O campo `phase` da estufa diz o que já foi atingido (tempo mínimo, temperatura e umidade) e o que conferir nas folhas. Depois da Secagem do talo, avançar finaliza a cura e para a secagem.
 
-Cada alerta abre uma vez por tipo e fecha sozinho quando o valor volta com folga para dentro do limite mais leve da fase atual. Se a gravidade aumentar, o alerta antigo é encerrado e um novo é aberto, para o app notificar de novo. As saídas no automático usam a faixa da fase em andamento.
+As regras usam a mediana dos últimos 30 s e exigem 80 % das amostras da janela, com ao menos 50 % do tempo coberto. Cada alerta abre uma vez por tipo e fecha sozinho quando o valor volta com folga para dentro do limite mais leve da fase atual e se mantém por 2 min. Se a gravidade cair, o mesmo alerta é rebaixado, sem notificar. Se a gravidade aumentar, o alerta antigo é encerrado e um novo é aberto, para o app notificar de novo. As saídas no automático usam a faixa da fase em andamento.
 
-O SHT40 mede umidade relativa, não bulbo úmido: os limites de umidade são parâmetros indiretos de monitoramento.
+O SHT40 mede temperatura e umidade relativa. O bulbo úmido, que é o que a literatura de cura controla, é estimado a partir delas em `services/psychrometrics.py`.
 
 Os períodos de cada fase ficam em `stage_changes` e aparecem em `GET /curing_units/{id}/series` (campo `phases`), que o painel e o app usam para colorir o gráfico.
 

@@ -29,10 +29,14 @@ class Settings(BaseSettings):
     # Porta em que o uvicorn roda; vai no anúncio mDNS.
     API_PORT: int = 8000
 
-    # Tempo sem leituras até o dispositivo aparecer como offline (e alerta "Sensor sem resposta").
+    # Tempo sem leituras até o dispositivo aparecer como offline ("Sem sinal" na interface).
     DEVICE_OFFLINE_SECONDS: int = 90
-    # Tempo sem leituras, com a secagem ligada, até o alarme crítico "Estufa sem novas leituras".
-    NO_READINGS_ALARM_SECONDS: int = 300
+
+    # Pressão usada para estimar o bulbo úmido (padrão: Lages, 916 m). O efeito no resultado é pequeno.
+    ATMOSPHERIC_PRESSURE_KPA: float = 90.8
+    # Aquecimento rápido: janela da regressão. Fica como "info" até medir a oscilação real da fornalha.
+    HEATING_RATE_WINDOW_MINUTES: int = 60
+    HEATING_RATE_SEVERITY: str = "info"
 
     model_config = SettingsConfigDict(
         env_file=BACKEND_DIR / ".env",
