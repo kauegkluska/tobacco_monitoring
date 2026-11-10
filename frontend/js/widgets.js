@@ -8,24 +8,44 @@ import * as f from "./format.js";
 /** Leituras mais antigas que isso aparecem apagadas. */
 const STALE_MS = 5 * 60_000;
 
-/** Situação da estufa em uma palavra, da mais urgente para a mais tranquila. */
-export function unitStatus({ unit, device, latest, activeAlerts, criticalAlerts }) {
-  if (!device) return { kind: "neutral", label: "Sem sensor", icon: "linkOff" };
+/**
+ * A resposta para "preciso ir lá?": o selo da lista (`label`) e a frase do topo da estufa (`title`, `text`).
+ * A conexão vem primeiro: sem dado novo, "Tudo certo" seria uma promessa falsa.
+ */
+export function unitStatus({ unit, device, latest, activeAlerts, criticalAlerts, sensorDoubt = false, message = null }) {
+  if (!api.online) {
+    return { rank: 0, kind: "offline", label: "Sem conexão", icon: "cloudOff", title: "Sem conexão com o monitor", text: "Os números abaixo podem estar velhos. Confira a internet." };
+  }
+  if (!device) return { rank: 8, kind: "neutral", label: "Sem sensor", icon: "linkOff", title: "Nenhum sensor nesta estufa", text: "Vincule o sensor para começar a acompanhar." };
   if (!unit.is_drying) {
     return unit.curing_stage === "Finalizado"
-      ? { kind: "ok", label: "Finalizada", icon: "checkCircle" }
-      : { kind: "neutral", label: "Parada", icon: "stop" };
+      ? { rank: 9, kind: "ok", label: "Finalizada", icon: "checkCircle", title: "Cura finalizada" }
+      : { rank: 9, kind: "neutral", label: "Parada", icon: "stop", title: "Secagem parada", text: "O sistema não está acompanhando a estufa nem enviando avisos." };
   }
-  if (criticalAlerts > 0) return { kind: "crit", label: "Crítico", icon: "error" };
-  if (device.status !== "online") return { kind: "offline", label: "Sem sinal", icon: "cloudOff" };
-  if (activeAlerts > 0) return { kind: "warn", label: "Atenção", icon: "warning" };
-  if (!latest) return { kind: "neutral", label: "Aguardando", icon: "clock" };
+  if ((latest && isStale(latest, unit, device)) || (!latest && device.status !== "online")) {
+    const since = latest ? f.relative(latest.timestamp) : device.last_seen_at ? f.relative(device.last_seen_at) : "ainda";
+    return { rank: 1, kind: "offline", label: "Sem notícias", icon: "cloudOff", title: `Sem notícias da estufa ${since}`, text: "Veja se a caixa da estufa está ligada e se o Wi-Fi de casa funciona." };
+  }
+  if (criticalAlerts > 0) return { rank: 2, kind: "crit", label: "Vá à estufa", icon: "error", title: "Vá à estufa agora", text: message };
+  if (sensorDoubt) return { rank: 3, kind: "warn", label: "Leitura duvidosa", icon: "help", title: "A leitura pode estar errada", text: message };
+  if (activeAlerts > 0) return { rank: 4, kind: "warn", label: "Fique de olho", icon: "warning", title: "Fique de olho", text: message };
+  if (!latest) return { rank: 7, kind: "neutral", label: "Aguardando", icon: "clock", title: "Aguardando a primeira leitura" };
   const limits = limitsFor(unit, device);
   const outside =
     rangeState(latest.temperature, limits.temp_min, limits.temp_max) !== "ok" ||
     rangeState(latest.humidity, limits.humidity_min, limits.humidity_max) !== "ok";
-  if (outside) return { kind: "warn", label: "Fora da faixa", icon: "tune" };
-  return { kind: "ok", label: "Normal", icon: "check" };
+  if (outside) return { rank: 5, kind: "warn", label: "Fora do esperado", icon: "tune", title: "Fique de olho", text: "A temperatura ou a umidade saiu do esperado para a fase." };
+  if (unit.phase?.ready) {
+    const finishing = unit.phase.next_stage === "Finalizado";
+    return { rank: 6, kind: "ok", label: "Pode avançar", icon: "chevronRight", title: finishing ? "Já dá para finalizar a cura" : "Já dá para passar de fase", text: `Olhe as folhas: ${unit.phase.visual_check}` };
+  }
+  return { rank: 7, kind: "ok", label: "Tudo certo", icon: "check", title: "Tudo certo" };
+}
+
+/** O alerta que vira a frase do topo: o mais grave, sem contar os informativos. */
+export function featuredAlert(alerts) {
+  const weight = (alert) => (isSevere(alert) ? 0 : alert.type === "Sensor suspeito" ? 1 : 2);
+  return [...alerts].filter((alert) => alert.severity !== "info").sort((a, b) => weight(a) - weight(b))[0] || null;
 }
 
 export function statusBadge(status) {
@@ -127,10 +147,19 @@ export function reading({ metric, value, limits, stale, compact = false, target 
   );
 }
 
+/** "Estou ciente" mantém o alerta aberto. Na queda de temperatura, aceita o novo nível e encerra. */
 export async function acknowledgeAlert(target, alert) {
+  if (alert.type === "Temperatura em queda") {
+    const confirmed = await confirmDialog({
+      title: "Você baixou de propósito?",
+      message: "O alerta será encerrado e esta temperatura passa a ser a referência. Se a fornalha estiver apagando, não confirme.",
+      confirmLabel: "Baixei de propósito",
+    });
+    if (!confirmed) return false;
+  }
   try {
     await withBusy(target, () => api.post(`/alerts/${alert.id}/acknowledge`));
-    toast("Alerta reconhecido.", "success");
+    toast("Anotado.", "success");
     return true;
   } catch (error) {
     toast(error.message, "error");
@@ -140,14 +169,14 @@ export async function acknowledgeAlert(target, alert) {
 
 export async function resolveAlert(target, alert) {
   const confirmed = await confirmDialog({
-    title: "Resolver alerta?",
-    message: "Se o valor continuar fora da faixa, um novo alerta abre na próxima leitura.",
-    confirmLabel: "Resolver",
+    title: "Encerrar este alerta?",
+    message: "Use só se o problema já acabou. Se continuar, um novo alerta abre sozinho.",
+    confirmLabel: "Encerrar",
   });
   if (!confirmed) return false;
   try {
     await withBusy(target, () => api.post(`/alerts/${alert.id}/resolve`));
-    toast("Alerta resolvido.", "success");
+    toast("Alerta encerrado.", "success");
     return true;
   } catch (error) {
     toast(error.message, "error");
@@ -155,14 +184,38 @@ export async function resolveAlert(target, alert) {
   }
 }
 
-/** Alerta com valor medido, limite e ações. `onChange` roda depois de reconhecer ou resolver. */
+/** Botões de um alerta ativo: uma ação principal e, discreto, encerrar à mão. */
+export function alertActions(alert, onChange) {
+  if (!alert.is_active || alert.severity === "info") return [];
+  const acknowledge = !alert.acknowledged_at
+    ? button(alert.type === "Temperatura em queda" ? "Baixei de propósito" : "Estou ciente", {
+        variant: "btn-primary btn-sm",
+        iconName: "check",
+        onClick: async (event) => {
+          if (await acknowledgeAlert(event.currentTarget, alert)) onChange?.();
+        },
+      })
+    : null;
+  const close = button("Encerrar", {
+    variant: "btn-ghost btn-sm",
+    onClick: async (event) => {
+      if (await resolveAlert(event.currentTarget, alert)) onChange?.();
+    },
+  });
+  return [acknowledge, close].filter(Boolean);
+}
+
+/** Alerta com a orientação em destaque; os valores ficam discretos. `onChange` roda depois de uma ação. */
 export function alertCard(alert, { onChange, showUnit = true } = {}) {
-  const tone = !alert.is_active ? "is-resolved" : isSevere(alert) ? "is-critical" : "is-warning";
-  const status = !alert.is_active ? "Resolvido" : alert.acknowledged_at ? `${severityLabel(alert)} · reconhecido` : severityLabel(alert);
+  const info = alert.severity === "info";
+  const tone = !alert.is_active ? "is-resolved" : isSevere(alert) ? "is-critical" : info ? "is-resolved" : "is-warning";
+  const status = !alert.is_active ? "Encerrado" : alert.acknowledged_at ? `${severityLabel(alert)} · ciente` : severityLabel(alert);
   // "Umidade alta" guarda o bulbo úmido estimado, que é uma temperatura.
-  const isTemp = alert.type.startsWith("Temperatura") || alert.type === "Umidade alta";
+  const wetBulb = alert.type === "Umidade alta";
+  const isTemp = alert.type.startsWith("Temperatura") || wetBulb;
   const value = (v) => (v === null || v === undefined ? "--" : isTemp ? f.temp(v) : f.humidity(v));
   const hasValues = alert.value !== null && alert.value !== undefined && alert.threshold !== null && alert.threshold !== undefined;
+  const limitLabel = alert.type === "Temperatura em queda" ? "alerta abaixo de" : alert.type.endsWith("alta") ? "máximo" : "mínimo";
   const unitName = alert.curing_unit_name || `Estufa ${alert.curing_unit_id}`;
 
   return h(
@@ -171,37 +224,18 @@ export function alertCard(alert, { onChange, showUnit = true } = {}) {
     h(
       "p",
       { class: "alert-status" },
-      icon(!alert.is_active ? "checkCircle" : isSevere(alert) ? "error" : "warning"),
+      icon(!alert.is_active ? "checkCircle" : isSevere(alert) ? "error" : info ? "help" : "warning"),
       h("span", {}, status),
       h("span", { class: "alert-time", title: f.fullDate(alert.timestamp) }, f.relative(alert.timestamp)),
     ),
     h("h3", { class: "alert-title" }, showUnit ? `${alert.type} · ${unitName}` : alert.type),
-    hasValues
-      ? h("p", { class: "alert-values" }, h("strong", {}, value(alert.value)), h("span", {}, ` · limite ${value(alert.threshold)}`))
-      : null,
-    alert.message ? h("p", { class: "small text-2" }, alert.message) : null,
+    alert.message ? h("p", { class: "text-2" }, alert.message) : null,
+    hasValues ? h("p", { class: "small muted" }, `${wetBulb ? "Bulbo úmido" : "Agora"} ${value(alert.value)} · ${limitLabel} ${value(alert.threshold)}`) : null,
     !alert.is_active && alert.resolved_at ? h("p", { class: "small muted" }, `Encerrado em ${f.fullDate(alert.resolved_at)}`) : null,
     h(
       "div",
       { class: "row alert-actions" },
-      alert.is_active
-        ? button("Resolver", {
-            variant: "btn-primary btn-sm",
-            iconName: "check",
-            onClick: async (event) => {
-              if (await resolveAlert(event.currentTarget, alert)) onChange?.();
-            },
-          })
-        : null,
-      alert.is_active && !alert.acknowledged_at
-        ? button("Reconhecer", {
-            variant: "btn-outline btn-sm",
-            iconName: "checkAll",
-            onClick: async (event) => {
-              if (await acknowledgeAlert(event.currentTarget, alert)) onChange?.();
-            },
-          })
-        : null,
+      alertActions(alert, onChange),
       showUnit ? h("a", { class: "card-link", href: `#/estufa/${alert.curing_unit_id}` }, "Abrir estufa", icon("chevronRight")) : null,
     ),
   );

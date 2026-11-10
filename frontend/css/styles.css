@@ -2390,3 +2390,13 @@ textarea {
     display: none;
   }
 }
+
+/* Frase de decisão no topo da estufa. */
+.decision .banner-title {
+  font-size: 1.35rem;
+  font-weight: 800;
+}
+
+.decision .banner-text {
+  font-size: 1rem;
+}

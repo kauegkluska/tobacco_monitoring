@@ -89,15 +89,6 @@ SATURATED_HUMIDITY = 99.0
 SATURATED_MINUTES = 30
 
 
-def _fahrenheit(celsius: float) -> float:
-    return celsius * 9 / 5 + 32
-
-
-def _br(value: float) -> str:
-    """Uma casa decimal com vírgula, como no restante da interface."""
-    return f"{value:.1f}".replace(".", ",")
-
-
 def _over(value: float, direction: str, threshold: float) -> bool:
     return value > threshold if direction == "high" else value < threshold
 
@@ -152,31 +143,22 @@ def _update(alert: Alert, severity: str, message: str, value: float | None, thre
     alert.threshold = threshold
 
 
-def _message(rule: Rule, phase: Phase, tier: Tier, sample: Sample) -> str:
+def _message(rule: Rule, phase: Phase) -> str:
+    """O que aconteceu e o que fazer, em linguagem do produtor. Os valores vão em campos que o app converte."""
     if rule.type == TEMPERATURE_HIGH_TYPE:
-        base = f"Temperatura acima do limite na fase de {phase.name}"
+        base = f"Passou do limite na fase de {phase.name}."
         if phase.key == "murchamento":
-            return (
-                f"{base}. Se as folhas de cima ainda não murcharam após cerca de 12 h, até 124 °F por 4 a 6 h é "
-                "aceitável. Caso contrário, reduza o fogo."
-            )
+            return f"{base} Reduza o fogo. Só mantenha assim por 4 a 6 h se as folhas de cima ainda não murcharam após cerca de 12 h."
         if phase.key == "secagem_folha":
-            return f"{base}. Se as lâminas de baixo já secaram, confirme a Secagem do talo; senão, reduza o fogo."
-        return f"{base} por {tier.sustain_minutes} min. Reduza o fogo."
+            return f"{base} Se as lâminas de baixo já secaram, passe para a Secagem do talo; senão, reduza o fogo."
+        return f"{base} Reduza o fogo."
     if rule.type == WET_BULB_HIGH_TYPE:
-        return (
-            f"Bulbo úmido estimado acima do limite na fase de {phase.name}: risco de escaldadura e escurecimento. "
-            "Abra os admissores e não suba o fogo."
-        )
+        return "A folha pode escaldar e escurecer. Abra o flap e não suba o fogo."
     if rule.type == DEPRESSION_HIGH_TYPE:
-        # Diferença de temperatura: em °F é 1,8 vez a diferença em °C.
-        return (
-            f"Ar seco demais para amarelar: {_br(sample.depression * 1.8)} °F entre bulbo seco e úmido "
-            f"(máximo {_br(tier.threshold * 1.8)} °F). Feche os admissores para não fixar a cor verde."
-        )
+        return "Ar seco demais: a folha pode ficar verde. Feche o flap."
     if rule.type == HUMIDITY_LOW_TYPE:
-        return "Ar seco no Murchamento. Se os estaleiros de cima ainda não amarelaram, feche um pouco os admissores."
-    return f"Temperatura abaixo da faixa na fase de {phase.name} por {tier.sustain_minutes} min. Verifique fornalha e lenha."
+        return "Ar seco no Murchamento. Se os estaleiros de cima ainda não amarelaram, feche um pouco o flap."
+    return f"Temperatura baixa para a fase de {phase.name}. Veja a fornalha e a lenha."
 
 
 def _shown_value(rule: Rule, sample: Sample) -> float | None:
@@ -199,14 +181,14 @@ def _evaluate_rule(db: Session, unit: CuringUnit, phase: Phase, rule: Rule, samp
     if active is None:
         if worst >= 0:
             tier = rule.tiers[worst]
-            _raise(db, unit, rule.type, tier.severity, _message(rule, phase, tier, sample), now, _shown_value(rule, sample), _shown_threshold(rule, tier))
+            _raise(db, unit, rule.type, tier.severity, _message(rule, phase), now, _shown_value(rule, sample), _shown_threshold(rule, tier))
         return
 
     rank = SEVERITY_RANK.get(active.severity, 0)
     level = max((i for i, tier in enumerate(rule.tiers) if SEVERITY_RANK[tier.severity] <= rank), default=0)
     if worst > level:
         tier = rule.tiers[worst]
-        _raise(db, unit, rule.type, tier.severity, _message(rule, phase, tier, sample), now, _shown_value(rule, sample), _shown_threshold(rule, tier))
+        _raise(db, unit, rule.type, tier.severity, _message(rule, phase), now, _shown_value(rule, sample), _shown_threshold(rule, tier))
         return
 
     # Desce um nível por vez enquanto o valor estiver, com folga e por tempo suficiente, dentro do limite.
@@ -222,7 +204,7 @@ def _evaluate_rule(db: Session, unit: CuringUnit, phase: Phase, rule: Rule, samp
         _close(db, active, now)
         return
     tier = rule.tiers[level]
-    _update(active, tier.severity, _message(rule, phase, tier, sample), _shown_value(rule, sample), _shown_threshold(rule, tier))
+    _update(active, tier.severity, _message(rule, phase), _shown_value(rule, sample), _shown_threshold(rule, tier))
 
 
 def _sync_anchor(db: Session, unit: CuringUnit, phase: Phase, temperature: float, now: datetime) -> None:
@@ -312,10 +294,7 @@ def _evaluate_drop(db: Session, unit: CuringUnit, phase: Phase, samples: list[Sa
     unit.drop_reference = reference
     threshold = reference - DROP_MARGIN_C
     severity = "critical" if stage_hours(unit, now) < phase.drop_critical_hours else "warning"
-    message = (
-        f"Temperatura caiu {_br((reference - temperature) * 1.8)} °F desde {_br(_fahrenheit(reference))} °F. "
-        "Veja fornalha, lenha e ventilador; ao retomar, suba cerca de 5 °F a cada 30 min."
-    )
+    message = "A temperatura caiu. Veja a fornalha, a lenha e o ventilador. Ao retomar, suba aos poucos, em degraus a cada 30 min."
     if active is not None:
         ratio = window_ratio(samples, now, CLEAR_MINUTES, lambda s: s.temperature >= reference - DROP_CLEAR_MARGIN_C)
         if ratio is not None and ratio >= PERSISTENCE_FRACTION:
@@ -362,11 +341,7 @@ def _evaluate_heating(db: Session, unit: CuringUnit, phase: Phase, samples: list
         return
     fast = sum(1 for slope in slopes if slope > limit) / len(slopes)
     if fast >= PERSISTENCE_FRACTION:
-        message = (
-            # Variação por hora: em °F é 1,8 vez a variação em °C.
-            f"Subindo {_br(slopes[0] * 1.8)} °F/h na fase de {phase.name}. "
-            f"Máximo: {_br(limit * 1.8)} °F/h. Reduza o fogo."
-        )
+        message = f"A temperatura está subindo rápido demais para a fase de {phase.name}. Reduza o fogo."
         _raise(db, unit, HEATING_TYPE, settings.HEATING_RATE_SEVERITY, message, now)
 
 
@@ -430,12 +405,12 @@ def _evaluate_sensor(db: Session, unit: CuringUnit, reading: Reading, samples: l
 
     if frozen or jumping:
         message = (
-            "Valores congelados há 10 min." if frozen else "Saltos repetidos na medição."
-        ) + " Confira sensor e cabo e compare com um termômetro de bulbo úmido."
+            "O sensor parou de variar e a leitura pode estar errada." if frozen else "A leitura está pulando e pode estar errada."
+        ) + " Confira o sensor e o cabo e compare com o termômetro da estufa."
         _raise(db, unit, SENSOR_TYPE, "warning", message, now)
         return True
     if saturated:
-        _raise(db, unit, SENSOR_TYPE, "warning", "Umidade em 99% ou mais há 30 min: possível condensação ou desvio do sensor.", now)
+        _raise(db, unit, SENSOR_TYPE, "warning", "Umidade em 99% ou mais há 30 min. Pode ser condensação no sensor: compare com o termômetro da estufa.", now)
         return False
     if active is None:
         return False
@@ -456,7 +431,7 @@ def _evaluate_sensor(db: Session, unit: CuringUnit, reading: Reading, samples: l
 def _evaluate_overdue(db: Session, unit: CuringUnit, phase: Phase, now: datetime) -> None:
     hours = stage_hours(unit, now)
     if hours > phase.max_hours:
-        _raise(db, unit, OVERDUE_TYPE, "info", f"Fase de {phase.name} há {round(hours)} h. Olhe as folhas e decida se avança.", now)
+        _raise(db, unit, OVERDUE_TYPE, "info", f"Fase de {phase.name} passando do tempo ({round(hours)} h). Olhe as folhas e decida se avança.", now)
     else:
         _close(db, _active(db, unit, OVERDUE_TYPE), now)
 
@@ -501,7 +476,7 @@ def check_missing_readings(db: Session, now: datetime | None = None) -> None:
         silent = (now - (last or unit.drying_started_at)).total_seconds()
         minutes = max(1, round(silent / 60))
         warning_after = math.inf if phase.no_readings_warning_seconds is None else phase.no_readings_warning_seconds
-        message = f"Sem dados há {minutes} min. Vá à estufa ver energia, ventilador e transmissor."
+        message = f"Sem notícias da estufa há {minutes} min. Veja se a caixa da estufa está ligada e se o Wi-Fi de casa funciona."
         if silent >= phase.no_readings_critical_seconds:
             _raise(db, unit, NO_READINGS_TYPE, "critical", message, now)
         elif silent >= warning_after:

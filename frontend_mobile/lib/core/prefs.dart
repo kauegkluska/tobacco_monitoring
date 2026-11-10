@@ -14,6 +14,9 @@ class AppPrefs extends ChangeNotifier {
   /// Notificações com o app fechado (serviço em segundo plano no Android). O usuário ativa no Perfil.
   bool backgroundAlerts = false;
 
+  /// O app já ofereceu os avisos com o app fechado (uma vez, logo depois de entrar).
+  bool askedBackgroundAlerts = false;
+
   Future<void> load() async {
     final storage = await SharedPreferences.getInstance();
     unit = storage.getString('pref_unit') == 'C' ? TempUnit.celsius : TempUnit.fahrenheit;
@@ -24,6 +27,7 @@ class AppPrefs extends ChangeNotifier {
     };
     phoneBuzzer = storage.getBool('pref_phone_buzzer') ?? true;
     backgroundAlerts = storage.getBool('pref_background_alerts') ?? false;
+    askedBackgroundAlerts = storage.getBool('pref_asked_background_alerts') ?? false;
   }
 
   Future<void> setUnit(TempUnit value) async {
@@ -45,6 +49,12 @@ class AppPrefs extends ChangeNotifier {
     notifyListeners();
     final storage = await SharedPreferences.getInstance();
     await storage.setBool('pref_phone_buzzer', value);
+  }
+
+  Future<void> markBackgroundAlertsAsked() async {
+    askedBackgroundAlerts = true;
+    final storage = await SharedPreferences.getInstance();
+    await storage.setBool('pref_asked_background_alerts', true);
   }
 
   Future<void> setBackgroundAlerts(bool value) async {

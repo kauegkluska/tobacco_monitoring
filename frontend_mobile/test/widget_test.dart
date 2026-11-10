@@ -12,11 +12,13 @@ import 'package:monitor_ambiental/core/models.dart';
 import 'package:monitor_ambiental/core/prefs.dart';
 import 'package:monitor_ambiental/core/theme.dart';
 import 'package:monitor_ambiental/widgets/common.dart';
+import 'package:monitor_ambiental/widgets/decision.dart';
 import 'package:monitor_ambiental/pages/cycles_page.dart';
 import 'package:monitor_ambiental/pages/login_page.dart';
 import 'package:monitor_ambiental/pages/qr_scanner_page.dart';
 import 'package:monitor_ambiental/pages/shell.dart';
 import 'package:monitor_ambiental/pages/unit_page.dart';
+import 'package:monitor_ambiental/pages/ventilation_page.dart';
 import 'package:monitor_ambiental/pages/units_page.dart';
 import 'package:monitor_ambiental/widgets/line_chart.dart';
 import 'package:monitor_ambiental/widgets/server_dialog.dart';
@@ -94,7 +96,6 @@ void main() {
       ],
     });
     expect(outputs.humidity.on, isTrue);
-    expect(outputs.humidity.relayLabel, 'Relé 1 · GPIO2');
     expect(outputs.humidity.inSync, isTrue);
     expect(outputs.temperature.confirmedOn, isNull);
     expect(outputTriggers[outputs.humidity.trigger], 'Temperatura acima do máximo');
@@ -114,7 +115,7 @@ void main() {
 
     await tester.tap(find.widgetWithText(FilledButton, 'Entrar'));
     await tester.pump();
-    expect(find.text('Informe o login.'), findsOneWidget);
+    expect(find.text('Informe o usuário.'), findsOneWidget);
   });
 
   testWidgets('login mostra a mensagem de erro da API', (tester) async {
@@ -127,7 +128,7 @@ void main() {
     );
     await tester.pumpWidget(_wrap(LoginPage(onAuthenticated: () {}), api: api));
 
-    await tester.enterText(find.widgetWithText(TextFormField, 'Login'), 'produtor');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Usuário'), 'produtor');
     await tester.enterText(find.widgetWithText(TextFormField, 'Senha'), 'errada');
     await tester.tap(find.widgetWithText(FilledButton, 'Entrar'));
     await tester.pumpAndSettle();
@@ -214,7 +215,7 @@ void main() {
 
     final alert = AlertItem.fromJson({'id': 1, 'type': 'Temperatura alta', 'severity': 'emergency', 'is_active': true, 'curing_unit_id': 1});
     expect(alert.isCritical, isTrue);
-    expect(alert.severityLabel, 'Emergência');
+    expect(alert.severityLabel, 'Vá à estufa agora');
   });
 
   testWidgets('gráfico mostra a fase do ponto tocado', (tester) async {
@@ -266,8 +267,8 @@ void main() {
     await tester.tap(find.text('abrir'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Procurar na rede'), findsOneWidget);
-    await tester.enterText(find.widgetWithText(TextField, 'URL da API'), 'http://192.168.0.14:8000/');
+    expect(find.text('Procurar no Wi-Fi'), findsOneWidget);
+    await tester.enterText(find.widgetWithText(TextField, 'Endereço'), 'http://192.168.0.14:8000/');
     await tester.tap(find.widgetWithText(FilledButton, 'Testar e salvar'));
     await tester.pumpAndSettle();
 
@@ -286,7 +287,7 @@ void main() {
       'phase': {
         'key': 'amarelacao', 'name': 'Amarelação', 'number': 1, 'total': 4,
         'temp_min': 35, 'temp_max': 40, 'humidity_min': 80, 'humidity_max': 95,
-        'min_hours': 24, 'max_hours': 48, 'hours': 2, 'overdue': false, 'next_stage': 'Murchamento', 'ready': false,
+        'min_hours': 24, 'max_hours': 48, 'hours': 2, 'overdue': false, 'next_stage': 'Murchamento', 'ready': false, 'remaining_hours_min': 29, 'remaining_hours_max': 53,
         'checks': [
           {'label': 'Temperatura em 38 °C ou mais', 'ok': false, 'metric': 'temperature', 'target': 38},
         ],
@@ -299,17 +300,43 @@ void main() {
 
     test('da mais urgente para a mais tranquila', () {
       final unit = CuringUnit.fromJson(drying);
-      String label(Device? d, Reading? r, {int active = 0, int critical = 0}) =>
-          unitStatus(unit: unit, device: d, latest: r, activeAlerts: active, criticalAlerts: critical).label;
+      String label(Device? d, Reading? r, {int active = 0, int critical = 0, bool connected = true, bool doubt = false}) => decide(
+            unit: unit, device: d, latest: r, connected: connected, warnings: active, criticals: critical, sensorDoubt: doubt,
+          ).short;
 
+      expect(label(device(), reading(37, 85), connected: false), 'Sem conexão');
       expect(label(null, null), 'Sem sensor');
-      expect(label(device(online: false), reading(37, 85), active: 1, critical: 1), 'Crítico');
-      expect(label(device(online: false), reading(37, 85)), 'Sem sinal');
-      expect(label(device(), reading(37, 85), active: 1), 'Atenção');
-      expect(label(device(), reading(41, 85)), 'Fora da faixa');
-      expect(label(device(), reading(37, 85)), 'Normal');
+      expect(label(device(online: false), reading(37, 85), active: 1, critical: 1), 'Sem notícias');
+      expect(label(device(), reading(37, 85), active: 1, critical: 1), 'Vá à estufa');
+      expect(label(device(), reading(37, 85), active: 1, doubt: true), 'Leitura duvidosa');
+      expect(label(device(), reading(37, 85), active: 1), 'Fique de olho');
+      expect(label(device(), reading(41, 85)), 'Fora do esperado');
+      expect(label(device(), null), 'Aguardando');
+      expect(label(device(), reading(37, 85)), 'Tudo certo');
       final stopped = CuringUnit.fromJson({...drying, 'drying_started_at': null, 'phase': null});
-      expect(unitStatus(unit: stopped, device: device(), latest: null, activeAlerts: 0, criticalAlerts: 0).label, 'Parada');
+      expect(decide(unit: stopped, device: device(), latest: null, connected: true).short, 'Parada');
+    });
+
+    test('"Tudo certo" exige leitura recente', () {
+      final old = Reading.fromJson({
+        'temperature': 37.0,
+        'humidity': 85.0,
+        'timestamp': DateTime.now().toUtc().subtract(const Duration(minutes: 20)).toIso8601String(),
+      });
+      final decision = decide(unit: CuringUnit.fromJson(drying), device: device(), latest: old, connected: true);
+      expect(decision.short, 'Sem notícias');
+      expect(decision.title, 'Sem notícias da estufa há 20 min');
+    });
+
+    test('o alerta mais grave vira a frase do topo; informativo nunca', () {
+      Map<String, dynamic> alert(int id, String severity, String type) => {'id': id, 'type': type, 'severity': severity, 'is_active': true, 'curing_unit_id': 1};
+      final info = AlertItem.fromJson(alert(1, 'info', 'Permanência longa'));
+      final warning = AlertItem.fromJson(alert(2, 'warning', 'Temperatura alta'));
+      final sensor = AlertItem.fromJson(alert(3, 'warning', 'Sensor suspeito'));
+      final critical = AlertItem.fromJson(alert(4, 'critical', 'Umidade alta'));
+      expect(featuredAlert([info]), isNull);
+      expect(featuredAlert([info, warning, sensor])?.id, 3);
+      expect(featuredAlert([warning, critical])?.id, 4);
     });
 
     test('alvo de temperatura segue a unidade escolhida', () {
@@ -329,9 +356,11 @@ void main() {
                   'active_alerts': 2,
                   'critical_alerts': 1,
                 },
+                {...drying, 'id': 2, 'name': 'Estufa 02', 'device_id': 4, 'drying_started_at': null, 'phase': null},
               ],
             '/devices/' => [
                 {'id': 3, 'device_code': 'ESP32-TOBACCO-01', 'status': 'online', 'curing_unit_id': 1},
+                {'id': 4, 'device_code': 'ESP32-TOBACCO-02', 'status': 'online', 'curing_unit_id': 2},
               ],
             _ => <dynamic>[],
           };
@@ -340,12 +369,12 @@ void main() {
       );
       var alertCount = 0;
       final actions = ShellActions(goTo: (_) {}, setAlertCount: (count) => alertCount = count, logout: () async {});
-      await tester.pumpWidget(_wrap(Scaffold(body: UnitsPage(actions: actions)), api: api));
+      await tester.pumpWidget(_wrap(UnitsPage(actions: actions), api: api));
       await tester.pump();
       await tester.pump();
 
       expect(find.text('Estufa 01'), findsOneWidget);
-      expect(find.byWidgetPredicate((widget) => widget is StatusBadge && widget.label == 'Crítico'), findsOneWidget);
+      expect(find.byWidgetPredicate((widget) => widget is StatusBadge && widget.label == 'Vá à estufa'), findsOneWidget);
       expect(find.text('105,8'), findsOneWidget);
       expect(find.text('85,0'), findsOneWidget);
       expect(find.text('Esperado 95 a 104 °F'), findsOneWidget);
@@ -395,15 +424,115 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.text('Estufa 01'), findsOneWidget);
       expect(find.text('Esperado 95 a 104 °F'), findsOneWidget);
-      expect(find.text('Temperatura alta'), findsOneWidget);
-      expect(find.text('Avançar fase'), findsOneWidget);
-      // A ventoinha segue o alvo: aparece na temperatura e nas saídas.
+      // O alerta vira a frase do topo, com a ação logo abaixo.
+      expect(find.text('Fique de olho'), findsOneWidget);
+      expect(find.text('Temperatura acima do limite na fase de Amarelação.'), findsOneWidget);
+      expect(find.text('Estou ciente'), findsOneWidget);
       expect(find.text('Alvo 100,4 °F'), findsOneWidget);
-      await tester.scrollUntilVisible(find.text('Desvincular'), 300);
-      expect(find.text('Ventoinhas'), findsOneWidget);
-      expect(find.text('Alvo  100,4 °F', findRichText: true), findsOneWidget);
-      expect(find.text('Alterar'), findsOneWidget);
+      expect(find.textContaining('Ventoinhas'), findsOneWidget);
+      await tester.scrollUntilVisible(find.text('Passar para Murchamento'), 300);
+      expect(find.textContaining('o normal é de 24 a 48 h'), findsOneWidget);
+      expect(find.text('de 1 d 5 h a 2 d 5 h'), findsOneWidget);
+      // Comandos e sensor ficam em telas próprias.
+      expect(find.text('Desvincular'), findsNothing);
+      expect(find.text('Parar secagem'), findsNothing);
       expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('sem conexão a frase do topo não diz que está tudo bem', (tester) async {
+      tester.view.physicalSize = const Size(360, 780);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final now = DateTime.now().toUtc();
+      final output = {'relay': 1, 'mode': 'auto', 'trigger': 'humidity_out', 'on': false, 'reason': '', 'in_sync': false};
+      var offline = false;
+      final api = ApiClient(
+        client: MockClient((request) async {
+          if (offline) throw http.ClientException('sem rede');
+          final Object body = switch (request.url.path) {
+            '/curing_units/1' => drying,
+            '/devices/' => [
+                {'id': 3, 'device_code': 'ESP32-TOBACCO-01', 'status': 'online', 'curing_unit_id': 1},
+              ],
+            '/curing_units/1/latest' => {'id': 9, 'temperature': 37.0, 'humidity': 85.0, 'timestamp': now.toIso8601String(), 'curing_unit_id': 1},
+            '/curing_units/1/outputs' => {
+                'curing_unit_id': 1, 'is_drying': true, 'target_temperature': 38,
+                'humidity': {...output, 'name': 'Flap'},
+                'temperature': {...output, 'name': 'Ventoinha', 'relay': 2},
+                'events': [],
+              },
+            '/curing_units/1/series' => {
+                'since': now.subtract(const Duration(hours: 24)).toIso8601String(), 'until': now.toIso8601String(), 'bucket_seconds': 120,
+                'points': [], 'stats': {'count': 0}, 'phases': [],
+              },
+            _ => <dynamic>[],
+          };
+          return http.Response.bytes(utf8.encode(jsonEncode(body)), 200, headers: {'content-type': 'application/json; charset=utf-8'});
+        }),
+      );
+      await tester.pumpWidget(_wrap(const UnitPage(unitId: 1), api: api));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Tudo certo'), findsOneWidget);
+
+      offline = true;
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Tudo certo'), findsNothing);
+      expect(find.text('Sem conexão com o monitor'), findsOneWidget);
+      expect(api.online.value, isFalse);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('consulta com a conexão fechada pelo servidor tenta de novo sem mostrar erro', (tester) async {
+      var calls = 0;
+      final api = ApiClient(
+        client: MockClient((request) async {
+          calls++;
+          if (calls == 1) throw http.ClientException('Connection closed before full header was received');
+          return http.Response('{"ok": true}', 200);
+        }),
+      );
+      final result = await api.get('/qualquer') as Map<String, dynamic>;
+      expect(result['ok'], isTrue);
+      expect(calls, 2);
+      expect(api.online.value, isTrue);
+    });
+
+    testWidgets('desligar uma saída pede confirmação', (tester) async {
+      tester.view.physicalSize = const Size(400, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final output = {'relay': 1, 'mode': 'auto', 'trigger': 'humidity_out', 'on': true, 'reason': 'Ligada porque a umidade saiu da faixa esperada.', 'in_sync': true};
+      final patches = <String>[];
+      final api = ApiClient(
+        client: MockClient((request) async {
+          if (request.method == 'PATCH') patches.add(request.body);
+          final body = {
+            'curing_unit_id': 1, 'is_drying': true, 'target_temperature': 38,
+            'humidity': {...output, 'name': 'Flap'},
+            'temperature': {...output, 'name': 'Ventoinha', 'relay': 2},
+            'events': [],
+          };
+          return http.Response.bytes(utf8.encode(jsonEncode(body)), 200, headers: {'content-type': 'application/json; charset=utf-8'});
+        }),
+      );
+      await tester.pumpWidget(_wrap(const VentilationPage(unitId: 1), api: api));
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.textContaining('GPIO'), findsNothing);
+      await tester.tap(find.text('Desligada').first);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('Desligar Flap?'), findsOneWidget);
+      expect(patches, isEmpty);
+      await tester.tap(find.widgetWithText(FilledButton, 'Desligar'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(patches.single, contains('"humidity_mode":"off"'));
     });
 
     testWidgets('secagem parada no meio pergunta se continua ou começa outra estufada', (tester) async {

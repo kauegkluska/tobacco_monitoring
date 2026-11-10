@@ -4,7 +4,7 @@ const TOKENS_KEY = "monitor.tokens";
 const BASE_KEY = "monitor.apiBase";
 
 const FIELD_NAMES = {
-  login: "Login",
+  login: "Usuário",
   password: "Senha",
   new_password: "Nova senha",
   current_password: "Senha atual",
@@ -185,7 +185,7 @@ class Api {
       });
     } catch (_) {
       this.setConnection(false);
-      throw new ApiError(`Não foi possível conectar ao servidor (${this.base}). Verifique se o backend está ligado.`, 0);
+      throw new ApiError("Não consegui falar com o monitor. Confira a internet.", 0);
     }
     this.setConnection(true);
 

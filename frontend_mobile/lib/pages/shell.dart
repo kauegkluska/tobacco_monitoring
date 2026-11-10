@@ -3,17 +3,17 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../core/app_scope.dart';
+import '../core/background.dart';
 import '../core/buzzer.dart';
 import '../core/models.dart';
 import '../core/prefs.dart';
 import '../widgets/common.dart';
-import 'alerts_page.dart';
-import 'cycles_page.dart';
+import 'history_page.dart';
 import 'settings_page.dart';
 import 'unit_page.dart';
 import 'units_page.dart';
 
-enum AppTab { units, alerts, cycles, settings }
+enum AppTab { units, history, settings }
 
 /// Ações que as telas podem pedir para a estrutura principal.
 class ShellActions {
@@ -36,9 +36,8 @@ class _Destination {
 }
 
 const _destinations = {
-  AppTab.units: _Destination('Estufas', Icons.warehouse_outlined, Icons.warehouse),
-  AppTab.alerts: _Destination('Alertas', Icons.notifications_outlined, Icons.notifications),
-  AppTab.cycles: _Destination('Secagens', Icons.history, Icons.history, title: 'Últimas secagens'),
+  AppTab.units: _Destination('Estufa', Icons.warehouse_outlined, Icons.warehouse),
+  AppTab.history: _Destination('Histórico', Icons.history, Icons.history),
   AppTab.settings: _Destination('Ajustes', Icons.settings_outlined, Icons.settings),
 };
 
@@ -69,6 +68,7 @@ class _HomeShellState extends State<HomeShell> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _refreshBadge();
       _watchBuzzer();
+      _offerBackgroundAlerts();
     });
   }
 
@@ -78,6 +78,23 @@ class _HomeShellState extends State<HomeShell> {
     buzzerTimer?.cancel();
     buzzer.dispose();
     super.dispose();
+  }
+
+  /// Os avisos com o app fechado são a função central: oferece uma vez, logo depois de entrar.
+  Future<void> _offerBackgroundAlerts() async {
+    final prefs = AppScope.of(context).prefs;
+    if (!BackgroundMonitor.supported || prefs.backgroundAlerts || prefs.askedBackgroundAlerts) return;
+    final accepted = await confirmAction(
+      context,
+      title: 'Receber avisos da estufa?',
+      message: 'Com isto ligado, o celular avisa mesmo com o app fechado. Sem isto, os alertas só aparecem com o app aberto.',
+      confirmLabel: 'Ligar avisos',
+    );
+    await prefs.markBackgroundAlertsAsked();
+    if (!accepted) return;
+    final problem = await BackgroundMonitor.start();
+    await prefs.setBackgroundAlerts(problem == null);
+    if (problem != null && mounted) showMessage(context, problem, error: true);
   }
 
   /// Acompanha os avisos sonoros do gateway (uma saída ligou) e repete o aviso no celular.
@@ -113,7 +130,7 @@ class _HomeShellState extends State<HomeShell> {
         children: [
           const Icon(Icons.volume_up, color: Color(0xffffb938)),
           const SizedBox(width: 10),
-          Expanded(child: Text('Aviso sonoro$where: ${describeOutputEvent(event, unit)}$extra')),
+          Expanded(child: Text('${describeOutputEvent(event, unit)}$where$extra')),
         ],
       ),
       action: SnackBarAction(label: 'Ver', onPressed: () => openUnit(context, event.unitId)),
@@ -124,7 +141,7 @@ class _HomeShellState extends State<HomeShell> {
     badgeTimer?.cancel();
     try {
       final alerts = await AppScope.of(context).api.get('/alerts/?active=true&limit=1000') as List;
-      _setAlertCount(alerts.where((alert) => !alert.isInfo).length);
+      _setAlertCount(alerts.where((alert) => (alert as Map<String, dynamic>)['severity'] != 'info').length);
     } catch (_) {
       // O indicador de conexão já mostra a falha.
     } finally {
@@ -142,8 +159,7 @@ class _HomeShellState extends State<HomeShell> {
     final key = ValueKey(tab);
     return switch (tab) {
       AppTab.units => UnitsPage(key: key, actions: actions),
-      AppTab.alerts => AlertsPage(key: key, actions: actions),
-      AppTab.cycles => CyclesPage(key: key),
+      AppTab.history => HistoryPage(key: key),
       AppTab.settings => SettingsPage(key: key, actions: actions),
     };
   }
@@ -151,7 +167,7 @@ class _HomeShellState extends State<HomeShell> {
   Widget _icon(AppTab item, bool selected) {
     final destination = _destinations[item]!;
     final icon = Icon(selected ? destination.selectedIcon : destination.icon);
-    if (item != AppTab.alerts || alertCount == 0) return icon;
+    if (item != AppTab.units || alertCount == 0) return icon;
     return Badge(label: Text(alertCount > 99 ? '99+' : '$alertCount'), child: icon);
   }
 
@@ -181,7 +197,8 @@ class _HomeShellState extends State<HomeShell> {
 
     if (wide) {
       return Scaffold(
-        appBar: appBar,
+        // A aba Estufa tem a própria barra, com o nome e o menu da estufa.
+        appBar: tab == AppTab.units ? null : appBar,
         body: Row(
           children: [
             NavigationRail(
@@ -201,7 +218,7 @@ class _HomeShellState extends State<HomeShell> {
     }
 
     return Scaffold(
-      appBar: appBar,
+      appBar: tab == AppTab.units ? null : appBar,
       body: body,
       bottomNavigationBar: NavigationBar(
         selectedIndex: tabs.indexOf(tab),

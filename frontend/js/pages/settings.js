@@ -6,12 +6,18 @@ import { badge, banner, button, clear, field, h, icon, loadingState, segmented, 
 import { prefs } from "../store.js";
 
 const LEGEND = [
-  ["ok", "Normal", "check", "Temperatura e umidade dentro do esperado para a fase."],
-  ["warn", "Fora da faixa", "tune", "Algum valor saiu do esperado, ainda sem alerta."],
-  ["warn", "Atenção", "warning", "Alerta aberto. Acompanhe a estufa."],
-  ["crit", "Crítico", "error", "Risco para a cura. Aja agora."],
-  ["offline", "Sem sinal", "cloudOff", "O sensor não envia leituras há mais de 90 s."],
-  ["neutral", "Parada", "stop", "Secagem desligada: nada é gravado e não há alertas."],
+  ["crit", "Vá à estufa", "error", "Risco para a cura. Aja agora."],
+  ["warn", "Fique de olho", "warning", "Há um alerta aberto. Acompanhe a estufa."],
+  ["warn", "Leitura duvidosa", "help", "O sensor pode estar com problema. Confira no termômetro da estufa."],
+  ["warn", "Fora do esperado", "tune", "Algum valor saiu do esperado, ainda sem alerta."],
+  ["offline", "Sem notícias", "cloudOff", "A estufa parou de mandar leituras."],
+  ["offline", "Sem conexão", "cloudOff", "Este aparelho não consegue falar com o monitor."],
+  ["ok", "Pode avançar", "chevronRight", "Tempo e temperatura atingidos. Olhe as folhas."],
+  ["ok", "Tudo certo", "check", "Dentro do esperado para a fase, com leitura recente."],
+  ["ok", "Finalizada", "checkCircle", "Cura concluída."],
+  ["neutral", "Aguardando", "clock", "Secagem ligada, esperando a primeira leitura."],
+  ["neutral", "Parada", "stop", "Secagem desligada: nada é gravado e não há avisos."],
+  ["neutral", "Sem sensor", "linkOff", "Falta vincular o sensor a esta estufa."],
 ];
 
 export function renderSettings(ctx) {
@@ -68,13 +74,13 @@ export function renderSettings(ctx) {
 
   function soundCard() {
     return card(
-      "Aviso sonoro",
+      "Apito",
       "volumeUp",
       h(
         "div",
         { class: "form" },
         choice(
-          "Tocar neste aparelho quando uma saída ligar",
+          "Apitar neste aparelho quando a ventoinha ou o flap ligar",
           segmented(
             [
               { value: true, label: "Ligado" },
@@ -85,7 +91,7 @@ export function renderSettings(ctx) {
               prefs.set({ sound: value });
               if (value) playBeep();
             },
-            "Tocar o aviso sonoro neste aparelho",
+            "Apitar neste aparelho",
           ),
         ),
         h("div", {}, button("Testar som", { variant: "btn-outline btn-sm", iconName: "volumeUp", onClick: playBeep })),
@@ -102,7 +108,7 @@ export function renderSettings(ctx) {
     return card(
       "Conta",
       "person",
-      h("p", { class: "small muted card-intro" }, `Login: ${user.login}`),
+      h("p", { class: "small muted card-intro" }, `Usuário: ${user.login}`),
       h(
         "form",
         {
@@ -149,7 +155,7 @@ export function renderSettings(ctx) {
     const input = h("input", { class: "input num", value: api.base, inputmode: "url", placeholder: "http://192.168.0.14:8000" });
     const save = button("Testar e salvar", { variant: "btn-primary", type: "submit" });
     return card(
-      "Servidor",
+      "Avançado",
       "server",
       h(
         "form",
@@ -161,14 +167,14 @@ export function renderSettings(ctx) {
               const ok = await withBusy(save, () => api.testConnection(input.value));
               if (!ok) throw new Error(`Sem resposta de ${input.value}.`);
               api.setBase(input.value);
-              toast("Servidor salvo. Entre novamente.", "success");
+              toast("Endereço salvo. Entre novamente.", "success");
               ctx.logout();
             } catch (error) {
               toast(error.message, "error");
             }
           },
         },
-        field({ label: "Endereço da API", input, hint: "Vale só para este navegador." }),
+        field({ label: "Endereço do monitor", input, hint: "Só mude isto se o responsável pelo sistema pedir." }),
         h("div", { class: "form-actions" }, save),
       ),
     );

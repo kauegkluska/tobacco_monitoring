@@ -69,7 +69,7 @@ Future<bool> showDurationForm(BuildContext context, ApiClient api, CuringUnit un
             controller: controller,
             autofocus: true,
             keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: 'Duração total', suffixText: 'horas', helperText: 'Uma cura leva de 84 a 168 h.'),
+            decoration: const InputDecoration(labelText: 'Duração total', suffixText: 'horas', helperText: 'Uma cura costuma levar de 5 a 7 dias (120 a 168 h).'),
           ),
           const SizedBox(height: 20),
           BusyButton(

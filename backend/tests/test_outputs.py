@@ -41,7 +41,7 @@ def test_auto_mode_turns_on_outside_the_safe_range_with_hysteresis(client, auth,
     outputs = client.get(f"/curing_units/{unit_id}/outputs", headers=auth).json()
     temperature = outputs["temperature"]
     assert (temperature["mode"], temperature["on"], temperature["trigger"]) == ("auto", True, "temperature_out")
-    assert temperature["reason"] == "Ligada: a temperatura saiu da faixa esperada."
+    assert temperature["reason"] == "Ligada porque a temperatura saiu da faixa esperada."
     assert (temperature["name"], temperature["relay"], temperature["pin"]) == ("Ventoinha", 2, "GPIO3")
     events = outputs["events"]
     assert [(e["output"], e["turned_on"], e["cause"]) for e in events] == [
@@ -184,7 +184,7 @@ def test_fan_keeps_the_target_temperature(client, auth, drying_unit):
     assert changed["target_temperature"] == 38
     # A última leitura (30 °C) já está abaixo do alvo: liga sem esperar a próxima.
     assert changed["temperature"]["on"] is True
-    assert changed["temperature"]["reason"] == "Ligada: a temperatura está abaixo do alvo."
+    assert changed["temperature"]["reason"] == "Ligada porque a temperatura está abaixo do alvo."
     assert commands(send_reading(client, 37.9, 85.0)) == (False, True)  # segue até atingir o alvo
     assert commands(send_reading(client, 38.0, 85.0)) == (False, False)  # atingiu: desliga
     assert commands(send_reading(client, 37.7, 85.0)) == (False, False)  # dentro da margem de 0,5 °C

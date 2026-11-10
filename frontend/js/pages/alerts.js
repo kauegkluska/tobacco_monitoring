@@ -1,14 +1,13 @@
-// Alertas de todas as estufas, com filtro por estado, estufa e gravidade.
+// Alertas de todas as estufas, com filtro por estado e estufa.
 
 import { api } from "../api.js";
-import { SEVERITIES } from "../data.js";
 import { banner, button, clear, emptyState, h, loadingState, select } from "../dom.js";
 import { alertCard } from "../widgets.js";
 
 const POLL_MS = 5000;
 const TABS = [
   { value: "active", label: "Ativos" },
-  { value: "resolved", label: "Resolvidos" },
+  { value: "resolved", label: "Encerrados" },
   { value: "all", label: "Todos" },
 ];
 
@@ -42,7 +41,7 @@ export function renderAlerts(ctx) {
   function draw() {
     const filtered = state.alerts.filter(
       (alert) =>
-        (state.unit === "all" || String(alert.curing_unit_id) === state.unit) && (state.severity === "all" || alert.severity === state.severity),
+        (state.unit === "all" || String(alert.curing_unit_id) === state.unit),
     );
     const list = filtered.filter((alert) => inTab(alert, state.tab));
 
@@ -84,11 +83,10 @@ export function renderAlerts(ctx) {
         { class: "filters" },
         tabs,
         state.units.length > 1 ? filter("unit", "Todas as estufas", state.units.map((unit) => ({ value: String(unit.id), label: unit.name }))) : null,
-        filter("severity", "Todas as gravidades", SEVERITIES),
       ),
       list.length
         ? h("div", { class: "grid grid-3" }, list.map((alert) => alertCard(alert, { onChange: load })))
-        : h("section", { class: "card" }, emptyState(state.tab === "active" ? "checkCircle" : "bell", state.tab === "active" ? "Nenhum alerta ativo" : "Nenhum alerta")),
+        : h("section", { class: "card" }, emptyState(state.tab === "active" ? "checkCircle" : "bell", state.tab === "active" ? "Nenhum problema agora" : "Nenhum alerta")),
     );
   }
 

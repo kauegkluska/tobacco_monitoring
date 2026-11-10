@@ -21,13 +21,25 @@ const _serviceId = 417;
 AndroidNotificationDetails _alertDetails(String ticker) => AndroidNotificationDetails(
       'avisos_estufa',
       'Avisos da estufa',
-      channelDescription: 'Aviso sonoro do gateway (uma saída ligou) e alertas de temperatura e umidade.',
+      channelDescription: 'Alertas de temperatura, umidade e perda de conexão.',
       importance: Importance.high,
       priority: Priority.high,
       category: AndroidNotificationCategory.alarm,
       color: const Color(0xff2e7d32),
       ticker: ticker,
     );
+// Canal próprio: se o flap ou a ventoinha ciclarem à noite, não tocam como alarme.
+const _relayDetails = AndroidNotificationDetails(
+  'saidas_estufa',
+  'Flap e ventoinha',
+  channelDescription: 'Quando o flap ou a ventoinha ligam.',
+  importance: Importance.defaultImportance,
+  priority: Priority.defaultPriority,
+  color: Color(0xff2e7d32),
+);
+// Quantas rodadas seguidas sem conexão (15 s cada) até avisar com som.
+const _failuresBeforeAlarm = 4;
+const _connectionNotificationId = 2;
 const _icon = NotificationIcon(metaDataName: 'com.example.monitor_ambiental.NOTIFICATION_ICON', backgroundColor: Color(0xff2e7d32));
 
 @pragma('vm:entry-point')
@@ -42,6 +54,7 @@ class _MonitorTaskHandler extends TaskHandler {
   int? _lastEventId;
   int? _lastAlertId;
   bool _busy = false;
+  int _failures = 0;
 
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
@@ -84,20 +97,24 @@ class _MonitorTaskHandler extends TaskHandler {
       // Com o app aberto, a própria tela já avisa (e bipa).
       if (notify && !await FlutterForegroundTask.isAppOnForeground) {
         for (final event in newEvents) {
-          await _show(
-            100000 + event.id,
-            'Aviso sonoro${event.unitName == null ? '' : ' · ${event.unitName}'}',
-            describeOutputEvent(event, _prefs.unit),
+          await _notifications.show(
+            id: 100000 + event.id,
+            title: '${event.displayName} ligou${event.unitName == null ? '' : ' · ${event.unitName}'}',
+            body: describeOutputEvent(event, _prefs.unit),
+            notificationDetails: const NotificationDetails(android: _relayDetails),
           );
         }
         for (final alert in newAlerts) {
           await _show(
             200000 + alert.id,
-            '${alert.isEmergency ? 'Emergência' : alert.isCritical ? 'Alerta crítico' : 'Alerta'}${alert.unitName == null ? '' : ' · ${alert.unitName}'}',
+            '${alert.severityLabel}${alert.unitName == null ? '' : ' · ${alert.unitName}'}',
             alert.message,
           );
         }
       }
+
+      if (_failures >= _failuresBeforeAlarm) await _notifications.cancel(id: _connectionNotificationId);
+      _failures = 0;
 
       final count = alerts.where((alert) => !alert.isInfo).length;
       FlutterForegroundTask.updateService(
@@ -107,9 +124,13 @@ class _MonitorTaskHandler extends TaskHandler {
     } on ApiException catch (error) {
       if (error.status == 401) return;
       FlutterForegroundTask.updateService(
-        notificationTitle: 'Sem conexão com o servidor',
-        notificationText: 'Tentando de novo a cada ${_interval.inSeconds} s. Confira o Wi-Fi do celular.',
+        notificationTitle: 'Sem conexão com o monitor',
+        notificationText: 'Tentando de novo a cada ${_interval.inSeconds} s. Confira a internet do celular.',
       );
+      _failures++;
+      if (_failures == _failuresBeforeAlarm) {
+        await _show(_connectionNotificationId, 'Sem conexão com o monitor', 'Você não vai receber avisos da estufa até a internet do celular voltar.');
+      }
     } catch (_) {
       // Resposta inesperada: tenta de novo na próxima rodada.
     } finally {

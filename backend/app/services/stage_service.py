@@ -107,6 +107,11 @@ def phase_status(unit: CuringUnit, now: datetime | None = None) -> dict | None:
         },
     ]
 
+    # Faixa, nunca valor único: a duração real depende das folhas.
+    later = PHASES[phase_index(phase) + 1:]
+    remaining_min = max(0.0, phase.min_hours - hours) + sum(item.min_hours for item in later)
+    remaining_max = max(0.0, phase.max_hours - hours) + sum(item.max_hours for item in later)
+
     return {
         "key": phase.key,
         "name": phase.name,
@@ -120,6 +125,8 @@ def phase_status(unit: CuringUnit, now: datetime | None = None) -> dict | None:
         "max_hours": phase.max_hours,
         "hours": hours,
         "overdue": hours > phase.max_hours,
+        "remaining_hours_min": remaining_min,
+        "remaining_hours_max": remaining_max,
         "next_stage": next_stage(phase),
         "ready": all(check["ok"] for check in checks),
         "checks": checks,

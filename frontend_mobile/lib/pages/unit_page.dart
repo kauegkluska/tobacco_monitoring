@@ -4,45 +4,38 @@ import 'package:flutter/material.dart';
 
 import '../core/api.dart';
 import '../core/app_scope.dart';
-import '../core/buzzer.dart';
 import '../core/format.dart' as f;
 import '../core/models.dart';
 import '../core/prefs.dart';
 import '../core/theme.dart';
 import '../widgets/alert_card.dart';
 import '../widgets/common.dart';
+import '../widgets/decision.dart';
 import '../widgets/line_chart.dart';
 import '../widgets/phases.dart';
 import '../widgets/unit_forms.dart';
 import '../widgets/unit_widgets.dart';
-import 'cycles_page.dart';
+import 'equipment_page.dart';
+import 'unit_chart_page.dart';
+import 'ventilation_page.dart';
 
 /// Abre a tela da estufa por cima das abas.
 Future<void> openUnit(BuildContext context, int unitId) {
   return Navigator.of(context).push(MaterialPageRoute(builder: (_) => UnitPage(unitId: unitId)));
 }
 
-class _Period {
-  const _Period(this.label, this.hours);
+enum _MenuAction { equipment, duration, stage, rename, stop, newUnit, delete }
 
-  final String label;
-  final int hours;
-}
-
-const _periods = [
-  _Period('6 h', 6),
-  _Period('24 h', 24),
-  _Period('7 dias', 24 * 7),
-  _Period('30 dias', 24 * 30),
-];
-
-enum _MenuAction { rename, duration, stage, delete }
-
-/// Tudo de uma estufa: leituras, alertas, cura, gráfico, saídas e sensor.
+/// Acompanhamento da estufa, do mais urgente ao menos usado.
+/// Comandos, sensor e gráfico completo ficam em telas próprias.
 class UnitPage extends StatefulWidget {
-  const UnitPage({required this.unitId, super.key});
+  const UnitPage({required this.unitId, this.onGone, this.onCreateUnit, super.key});
 
   final int unitId;
+
+  /// Quando a tela é a própria aba (produtor com uma só estufa): avisa que ela foi excluída.
+  final VoidCallback? onGone;
+  final Future<void> Function()? onCreateUnit;
 
   @override
   State<UnitPage> createState() => _UnitPageState();
@@ -59,9 +52,6 @@ class _UnitPageState extends State<UnitPage> {
   Outputs? outputs;
   Series? series;
   DateTime? seriesLoadedAt;
-  bool seriesLoading = false;
-  _Period period = _periods.first;
-  bool temperature = true;
   String? error;
   Timer? timer;
 
@@ -79,6 +69,14 @@ class _UnitPageState extends State<UnitPage> {
   void dispose() {
     timer?.cancel();
     super.dispose();
+  }
+
+  void _gone() {
+    if (widget.onGone != null) {
+      widget.onGone!();
+    } else {
+      Navigator.of(context).maybePop();
+    }
   }
 
   Future<void> _load() async {
@@ -108,12 +106,13 @@ class _UnitPageState extends State<UnitPage> {
     } on ApiException catch (exception) {
       if (!mounted) return;
       if (exception.status == 404) {
-        Navigator.of(context).maybePop();
+        _gone();
         return;
       }
       if (unit == null) {
         setState(() => error = exception.message);
-      } else {
+      } else if (exception.status != 0) {
+        // Sem conexão quem avisa é a frase do topo, sem repetir um aviso a cada consulta.
         showMessage(context, exception.message, error: true);
       }
     } finally {
@@ -122,23 +121,20 @@ class _UnitPageState extends State<UnitPage> {
   }
 
   Future<void> _loadSeries() async {
-    setState(() => seriesLoading = true);
     final until = DateTime.now().toUtc();
-    final since = until.subtract(Duration(hours: period.hours));
+    final since = until.subtract(const Duration(hours: 24));
     try {
       final result = await api.get(
         '$_base/series?since=${Uri.encodeQueryComponent(since.toIso8601String())}'
-        '&until=${Uri.encodeQueryComponent(until.toIso8601String())}&points=180',
+        '&until=${Uri.encodeQueryComponent(until.toIso8601String())}&points=60',
       );
       if (!mounted) return;
       setState(() {
         series = Series.fromJson(result as Map<String, dynamic>);
         seriesLoadedAt = DateTime.now();
       });
-    } on ApiException catch (exception) {
-      if (mounted) showMessage(context, exception.message, error: true);
-    } finally {
-      if (mounted) setState(() => seriesLoading = false);
+    } on ApiException {
+      // O resumo é secundário: tenta de novo na próxima consulta.
     }
   }
 
@@ -158,9 +154,6 @@ class _UnitPageState extends State<UnitPage> {
       if (mounted) showMessage(context, exception.message, error: true);
     }
   }
-
-  // ---------------------------------------------------------------------------
-  // Cura
 
   Future<void> _startDrying(CuringUnit current) async {
     var newBatch = false;
@@ -196,7 +189,7 @@ class _UnitPageState extends State<UnitPage> {
     final confirmed = await confirmAction(
       context,
       title: 'Parar a secagem?',
-      message: 'Com a secagem parada, as leituras não são gravadas e não há alertas.',
+      message: 'Se parar, o app deixa de acompanhar a estufa e você não recebe mais avisos.',
       confirmLabel: 'Parar',
       danger: true,
     );
@@ -208,13 +201,13 @@ class _UnitPageState extends State<UnitPage> {
     final pending = [for (final check in phase.checks) if (!check.ok) phaseCheckLabel(check, prefs.unit).toLowerCase()];
     final confirmed = await confirmAction(
       context,
-      title: finishing ? 'Finalizar a cura?' : 'Avançar para ${phase.nextStage}?',
+      title: finishing ? 'Finalizar a cura?' : 'Passar para ${phase.nextStage}?',
       message: [
         'Nas folhas: ${phase.visualCheck}',
         if (pending.isNotEmpty) 'Ainda falta: ${pending.join('; ')}.',
         if (finishing) 'A secagem será encerrada.',
       ].join('\n\n'),
-      confirmLabel: finishing ? 'Finalizar' : 'Avançar',
+      confirmLabel: finishing ? 'Finalizar' : 'Passar de fase',
     );
     if (!confirmed) return;
     await _run(
@@ -244,11 +237,11 @@ class _UnitPageState extends State<UnitPage> {
     await _run(() => api.patch(_base, {'curing_stage': chosen}), 'Fase: $chosen.', withSeries: true);
   }
 
-  // ---------------------------------------------------------------------------
-  // Estufa e sensor
-
   Future<void> _menu(_MenuAction action, CuringUnit current) async {
     switch (action) {
+      case _MenuAction.equipment:
+        await Navigator.of(context).push(MaterialPageRoute(builder: (_) => EquipmentPage(unitId: widget.unitId)));
+        if (mounted) await _reload();
       case _MenuAction.rename:
         if (await showUnitForm(context, api, unit: current) != null) await _reload();
       case _MenuAction.duration:
@@ -258,6 +251,10 @@ class _UnitPageState extends State<UnitPage> {
         }
       case _MenuAction.stage:
         await _changeStage(current);
+      case _MenuAction.stop:
+        await _stopDrying();
+      case _MenuAction.newUnit:
+        await widget.onCreateUnit?.call();
       case _MenuAction.delete:
         await _delete(current);
     }
@@ -267,7 +264,7 @@ class _UnitPageState extends State<UnitPage> {
     final confirmed = await confirmAction(
       context,
       title: 'Excluir ${current.name}?',
-      message: 'Só estufas sem leituras gravadas podem ser excluídas.',
+      message: 'A estufa sai da sua lista.',
       confirmLabel: 'Excluir',
       danger: true,
     );
@@ -276,7 +273,7 @@ class _UnitPageState extends State<UnitPage> {
       await api.delete(_base);
       if (!mounted) return;
       showMessage(context, 'Estufa excluída.');
-      Navigator.of(context).pop();
+      _gone();
     } on ApiException catch (exception) {
       if (mounted) showMessage(context, exception.message, error: true);
     }
@@ -289,169 +286,10 @@ class _UnitPageState extends State<UnitPage> {
     await _reload();
   }
 
-  Future<void> _checkDevice(Device target) async {
-    try {
-      final result = await api.post('/devices/${target.id}/reconnect') as Map<String, dynamic>;
-      if (!mounted) return;
-      if (result['status'] == 'online') {
-        showMessage(context, 'Sensor online.');
-      } else {
-        showMessage(context, 'Sensor sem sinal. Confira a energia do sensor e o gateway.', error: true);
-      }
-      await _reload();
-    } on ApiException catch (exception) {
-      if (mounted) showMessage(context, exception.message, error: true);
-    }
+  Future<void> _openVentilation(CuringUnit current) async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => VentilationPage(unitId: widget.unitId, phase: current.phase)));
+    if (mounted) await _reload();
   }
-
-  Future<void> _unlinkDevice(Device target) async {
-    final confirmed = await confirmAction(
-      context,
-      title: 'Desvincular ${target.code}?',
-      message: 'O histórico continua salvo. A estufa deixa de receber leituras deste sensor.',
-      confirmLabel: 'Desvincular',
-      danger: true,
-    );
-    if (confirmed) await _run(() => api.delete('/devices/${target.id}'), 'Sensor desvinculado.');
-  }
-
-  // ---------------------------------------------------------------------------
-  // Saídas
-
-  Future<void> _setOutputMode(String output, String mode) async {
-    final name = (output == 'temperature' ? outputs?.temperature : outputs?.humidity)?.name ?? 'Saída';
-    if (mode == 'on') {
-      final confirmed = await confirmAction(
-        context,
-        title: 'Ligar $name?',
-        message: 'Fica ligada até você escolher Automático ou Desligada. O gateway toca o aviso sonoro por 2 s.',
-        confirmLabel: 'Ligar',
-      );
-      if (!confirmed) return;
-    }
-    try {
-      final result = await api.patch('$_base/outputs', {'${output}_mode': mode});
-      if (!mounted) return;
-      setState(() => outputs = Outputs.fromJson(result as Map<String, dynamic>));
-      showMessage(context, switch (mode) {
-        'on' => '$name ligada.',
-        'off' => '$name desligada.',
-        _ => '$name no automático.',
-      });
-    } on ApiException catch (exception) {
-      if (mounted) showMessage(context, exception.message, error: true);
-    }
-  }
-
-  Future<void> _editOutput(String output, OutputState state) async {
-    final name = TextEditingController(text: state.name);
-    var trigger = state.trigger;
-    String? sheetError;
-    await showFormSheet<void>(
-      context,
-      title: 'Editar ${state.relayLabel.toLowerCase()}',
-      builder: (sheetContext) => StatefulBuilder(
-        builder: (sheetContext, setSheetState) => Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            FormErrorText(sheetError),
-            TextField(
-              controller: name,
-              autofocus: true,
-              maxLength: 40,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(labelText: 'Nome', hintText: 'Ex.: Ventoinhas, Queimador'),
-            ),
-            const SizedBox(height: 8),
-            DropdownButtonFormField<String>(
-              initialValue: trigger,
-              isExpanded: true,
-              decoration: const InputDecoration(labelText: 'No automático, liga com'),
-              items: [for (final entry in outputTriggers.entries) DropdownMenuItem(value: entry.key, child: Text(entry.value))],
-              onChanged: (value) => setSheetState(() => trigger = value ?? trigger),
-            ),
-            const SizedBox(height: 20),
-            BusyButton(
-              label: 'Salvar',
-              onPressed: () async {
-                final newName = name.text.trim();
-                if (newName.isEmpty) {
-                  setSheetState(() => sheetError = 'Informe o nome.');
-                  return;
-                }
-                try {
-                  final result = await api.patch('$_base/outputs', {'${output}_name': newName, '${output}_trigger': trigger});
-                  if (sheetContext.mounted) Navigator.pop(sheetContext);
-                  if (mounted) setState(() => outputs = Outputs.fromJson(result as Map<String, dynamic>));
-                } on ApiException catch (exception) {
-                  setSheetState(() => sheetError = exception.message);
-                }
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-    name.dispose();
-  }
-
-  /// Temperatura alvo da ventoinha, digitada na unidade escolhida e enviada em °C.
-  Future<void> _editTarget() async {
-    final unitPref = prefs.unit;
-    final symbol = f.unitSymbol(unitPref);
-    final current = outputs?.targetTemperature;
-    final controller = TextEditingController(text: current == null ? '' : f.number(f.tempValue(current, unitPref), 0));
-    final phase = unit?.phase;
-    String? sheetError;
-    await showFormSheet<void>(
-      context,
-      title: 'Temperatura alvo',
-      builder: (sheetContext) => StatefulBuilder(
-        builder: (sheetContext, setSheetState) => Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            FormErrorText(sheetError),
-            TextField(
-              controller: controller,
-              autofocus: true,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: InputDecoration(
-                labelText: 'Alvo',
-                suffixText: symbol,
-                helperText: phase == null
-                    ? 'A ventoinha liga abaixo do alvo e desliga ao atingi-lo.'
-                    : 'Faixa da fase: ${f.tempRange(phase.limits.tempMin, phase.limits.tempMax, unitPref)}',
-              ),
-            ),
-            const SizedBox(height: 20),
-            BusyButton(
-              label: 'Salvar',
-              onPressed: () async {
-                final typed = double.tryParse(controller.text.trim().replaceAll(',', '.'));
-                final celsius = typed == null ? null : f.tempToCelsius(typed, unitPref);
-                if (celsius == null || celsius < 20 || celsius > 90) {
-                  setSheetState(() => sheetError = 'Informe um valor entre ${f.tempRange(20, 90, unitPref)}.');
-                  return;
-                }
-                try {
-                  final result = await api.patch('$_base/outputs', {'target_temperature': double.parse(celsius.toStringAsFixed(2))});
-                  if (sheetContext.mounted) Navigator.pop(sheetContext);
-                  if (!mounted) return;
-                  setState(() => outputs = Outputs.fromJson(result as Map<String, dynamic>));
-                  showMessage(context, 'Alvo: ${f.temp(celsius, unitPref, digits: 0)}.');
-                } on ApiException catch (exception) {
-                  setSheetState(() => sheetError = exception.message);
-                }
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-    controller.dispose();
-  }
-
-  // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -464,11 +302,15 @@ class _UnitPageState extends State<UnitPage> {
             PopupMenuButton<_MenuAction>(
               tooltip: 'Mais opções',
               onSelected: (action) => _menu(action, current),
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: _MenuAction.rename, child: Text('Renomear')),
-                PopupMenuItem(value: _MenuAction.duration, child: Text('Duração prevista')),
-                PopupMenuItem(value: _MenuAction.stage, child: Text('Corrigir fase')),
-                PopupMenuItem(value: _MenuAction.delete, child: Text('Excluir estufa')),
+              itemBuilder: (_) => [
+                const PopupMenuItem(value: _MenuAction.equipment, child: Text('Equipamento')),
+                const PopupMenuItem(value: _MenuAction.duration, child: Text('Duração prevista')),
+                const PopupMenuItem(value: _MenuAction.stage, child: Text('Corrigir fase')),
+                const PopupMenuItem(value: _MenuAction.rename, child: Text('Renomear')),
+                if (widget.onCreateUnit != null) const PopupMenuItem(value: _MenuAction.newUnit, child: Text('Nova estufa')),
+                if (current.isDrying) const PopupMenuItem(value: _MenuAction.stop, child: Text('Parar secagem')),
+                // A API só exclui estufa sem leituras: não oferece o que depois recusaria.
+                if (latest == null && !current.isDrying) const PopupMenuItem(value: _MenuAction.delete, child: Text('Excluir estufa')),
               ],
             ),
         ],
@@ -477,44 +319,39 @@ class _UnitPageState extends State<UnitPage> {
           ? ErrorView(title: 'Não foi possível carregar a estufa', message: error!, onRetry: _load)
           : current == null
               ? const LoadingView()
-              : ListenableBuilder(listenable: prefs, builder: (context, _) => _body(current)),
+              : AnimatedBuilder(
+                  animation: Listenable.merge([prefs, api.online]),
+                  builder: (context, _) => _body(current),
+                ),
     );
   }
 
   Widget _body(CuringUnit current) {
+    final featured = featuredAlert(alerts);
+    final decision = decide(
+      unit: current,
+      device: device,
+      latest: latest,
+      connected: api.online.value,
+      criticals: alerts.where((alert) => alert.isCritical).length,
+      warnings: alerts.where((alert) => !alert.isInfo).length,
+      sensorDoubt: alerts.any((alert) => alert.isSensor),
+      message: featured?.message,
+    );
+    final showsFeatured = featured != null && decision.text == featured.message;
+    final others = alerts.where((alert) => !showsFeatured || alert.id != featured.id).toList();
     final limits = current.limitsWith(device);
-    final expected = current.phase == null ? null : limits;
-    final stale = isStale(latest, current, device);
+
     final children = <Widget>[
-      _summary(current),
-      Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(child: ReadingTile(
-                  metric: Metric.temperature,
-                  value: latest?.temperature,
-                  limits: expected,
-                  unit: prefs.unit,
-                  stale: stale,
-                  target: outputs?.usesTarget == true ? outputs?.targetTemperature : null,
-                ),),
-              const SizedBox(width: 20),
-              Expanded(child: ReadingTile(metric: Metric.humidity, value: latest?.humidity, limits: expected, unit: prefs.unit, stale: stale)),
-            ],
-          ),
-        ),
+      DecisionCard(
+        kind: decision.kind,
+        icon: decision.icon,
+        title: decision.title,
+        text: decision.text,
+        onHelp: () => showStatusLegend(context),
+        action: showsFeatured ? _alertActions(featured) : _setupAction(current),
       ),
-      if (device != null && !device!.online)
-        StatusBanner(
-          kind: StatusKind.offline,
-          icon: Icons.cloud_off,
-          title: 'Sensor sem sinal ${device!.lastSeen == null ? 'desde o vínculo' : f.relative(device!.lastSeen)}',
-          text: 'Confira a energia do sensor e o Wi-Fi do gateway.',
-        ),
-      for (final alert in alerts)
+      for (final alert in others)
         AlertCard(
           alert: alert,
           unit: prefs.unit,
@@ -526,10 +363,10 @@ class _UnitPageState extends State<UnitPage> {
             if (await resolveAlert(context, api, alert)) await _reload();
           },
         ),
-      _curingCard(current),
-      _chartCard(current, limits),
-      _outputsCard(),
-      _sensorCard(),
+      _readingsCard(current, limits, alerts.any((alert) => alert.isSensor)),
+      if (outputs != null) _ventilationLine(current, outputs!),
+      if (current.isDrying || current.interrupted) _phaseCard(current),
+      _miniChart(current, limits),
     ];
 
     return RefreshIndicator(
@@ -549,38 +386,121 @@ class _UnitPageState extends State<UnitPage> {
     );
   }
 
-  /// Fase e situação numa linha, logo abaixo do nome.
-  Widget _summary(CuringUnit current) {
-    final status = unitStatus(
-      unit: current,
-      device: device,
-      latest: latest,
-      activeAlerts: alerts.where((alert) => !alert.isInfo).length,
-      criticalAlerts: alerts.where((alert) => alert.isCritical).length,
-    );
-    final phase = current.phase;
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        StatusBadge(kind: status.kind, label: status.label, icon: status.icon),
-        PhaseTag(
-          label: phase == null ? current.stage : 'Fase ${phase.number} de ${phase.total} · ${current.stage}',
-          color: context.colors.phase(phaseKeyOf(current.stage)),
-        ),
-        if (latest != null) Text('Leitura ${f.relative(latest!.timestamp)}', style: TextStyle(fontSize: 13, color: context.colors.muted)),
-      ],
+  Widget _alertActions(AlertItem alert) => AlertActions(
+        alert: alert,
+        unit: prefs.unit,
+        onAcknowledge: () async {
+          if (await acknowledgeAlert(context, api, alert)) await _reload();
+        },
+        onResolve: () async {
+          if (await resolveAlert(context, api, alert)) await _reload();
+        },
+      );
+
+  /// Próximo passo quando a estufa ainda não está sendo acompanhada.
+  Widget? _setupAction(CuringUnit current) {
+    if (device == null) {
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: BusyButton(label: 'Vincular sensor', icon: Icons.link, onPressed: _linkDevice),
+      );
+    }
+    if (current.isDrying) return null;
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: BusyButton(
+        label: current.isFinished ? 'Nova estufada' : 'Iniciar secagem',
+        icon: Icons.play_arrow,
+        onPressed: () => _startDrying(current),
+      ),
     );
   }
 
-  Widget _curingCard(CuringUnit current) {
+  Widget _readingsCard(CuringUnit current, Limits limits, bool doubtful) {
+    final expected = current.phase == null ? null : limits;
+    final stale = isStale(latest, current, device) || doubtful;
+    final caption = latest == null ? null : (doubtful ? 'Leitura duvidosa, ${f.relative(latest!.timestamp)}' : 'Leitura ${f.relative(latest!.timestamp)}');
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: ReadingTile(
+                    metric: Metric.temperature,
+                    value: latest?.temperature,
+                    limits: expected,
+                    unit: prefs.unit,
+                    stale: stale,
+                    target: outputs?.usesTarget == true ? outputs?.targetTemperature : null,
+                  ),
+                ),
+                const SizedBox(width: 20),
+                Expanded(child: ReadingTile(metric: Metric.humidity, value: latest?.humidity, limits: expected, unit: prefs.unit, stale: stale)),
+              ],
+            ),
+            if (caption != null) ...[
+              const SizedBox(height: 10),
+              Text(caption, style: TextStyle(fontSize: 13, color: context.colors.muted)),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// O que o sistema já está fazendo, numa linha; os comandos ficam na tela de Ventilação.
+  Widget _ventilationLine(CuringUnit current, Outputs data) {
+    String describe(OutputState state) {
+      if (current.isDrying && state.followsTarget && state.mode == 'auto' && data.targetTemperature == null) {
+        return '${state.name}: falta definir a temperatura alvo';
+      }
+      final running = state.on ? 'em funcionamento' : 'sem funcionar';
+      return '${state.name}: $running${state.mode == 'auto' ? '' : ', acionamento manual'}';
+    }
+
+    bool needsAttention(OutputState state) =>
+        state.mode != 'auto' || (current.isDrying && state.followsTarget && data.targetTemperature == null);
+    final attention = needsAttention(data.humidity) || needsAttention(data.temperature);
+    final c = context.colors;
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => _openVentilation(current),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+          child: Row(
+            children: [
+              Icon(attention ? Icons.warning_amber_rounded : Icons.air, color: attention ? c.warn : c.textSecondary),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Ventilação', style: TextStyle(fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 2),
+                    Text(describe(data.humidity), style: TextStyle(fontSize: 13.5, color: c.textSecondary)),
+                    Text(describe(data.temperature), style: TextStyle(fontSize: 13.5, color: c.textSecondary)),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right, color: c.muted),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _phaseCard(CuringUnit current) {
     final phase = current.phase;
     final elapsed = current.cycleHours;
     final total = current.estimatedHours;
-    final progress = current.isDrying && elapsed != null && total != null && total > 0 ? (elapsed / total).clamp(0.0, 1.0) : null;
     final c = context.colors;
-    // Com a secagem parada no meio da cura, a fase em que parou continua marcada.
     final stageIndex = curingPhases.indexWhere((item) => item.name == current.stage);
 
     Widget check(IconData icon, Color color, String text) => Padding(
@@ -592,8 +512,11 @@ class _UnitPageState extends State<UnitPage> {
           ]),
         );
 
+    final remainingMin = phase?.remainingMin;
+    final remainingMax = phase?.remainingMax;
+
     return SectionCard(
-      title: 'Cura',
+      title: phase == null ? current.stage : '${phase.name} · fase ${phase.number} de ${phase.total}',
       icon: Icons.eco_outlined,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -606,406 +529,88 @@ class _UnitPageState extends State<UnitPage> {
               style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: c.textSecondary),
             ),
           ],
-          if (current.isDrying || current.interrupted) ...[
-            const SizedBox(height: 16),
-            DetailGrid(items: [
-              DetailItem(
-                label: 'Nesta fase',
-                value: phase == null
-                    ? f.duration(current.stageHours)
-                    : '${f.duration(phase.hours)} de ${f.number(phase.minHours, 0)}–${f.number(phase.maxHours, 0)} h',
-              ),
-              DetailItem(label: 'Secagem total', value: f.duration(elapsed)),
-              if (total != null && current.isDrying) DetailItem(label: 'Término previsto', value: f.dateTime(current.estimatedCompletion)),
-            ]),
-            if (progress != null) ...[
-              const SizedBox(height: 12),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(999),
-                child: LinearProgressIndicator(value: progress, minHeight: 6, backgroundColor: c.surface3),
-              ),
-            ],
-          ],
+          const SizedBox(height: 16),
+          DetailGrid(items: [
+            DetailItem(
+              label: 'Nesta fase',
+              value: phase == null
+                  ? f.duration(current.stageHours)
+                  : '${f.duration(phase.hours)} (o normal é de ${f.number(phase.minHours, 0)} a ${f.number(phase.maxHours, 0)} h)',
+            ),
+            if (remainingMin != null && remainingMax != null)
+              DetailItem(label: 'Falta para acabar', value: 'de ${f.duration(remainingMin)} a ${f.duration(remainingMax)}'),
+            DetailItem(label: 'Secagem total', value: f.duration(elapsed)),
+            if (total != null && current.isDrying) DetailItem(label: 'Término previsto', value: f.dateTime(current.estimatedCompletion)),
+          ]),
           if (phase != null) ...[
             const SizedBox(height: 16),
             Text(
-              phase.finishes ? 'Para finalizar' : 'Para avançar para ${phase.nextStage}',
+              phase.ready ? 'Já dá para passar de fase' : 'Ainda não é hora de passar de fase',
               style: const TextStyle(fontWeight: FontWeight.w700),
             ),
-            if (phase.overdue) check(Icons.warning_amber_rounded, c.warn, 'Passou das ${f.number(phase.maxHours, 0)} h previstas para a fase.'),
+            if (phase.overdue) check(Icons.warning_amber_rounded, c.warn, 'Passou do tempo previsto. Olhe as folhas.'),
             for (final item in phase.checks)
               check(item.ok ? Icons.check_circle : Icons.radio_button_unchecked, item.ok ? c.ok : c.muted, phaseCheckLabel(item, prefs.unit)),
             check(Icons.visibility_outlined, c.phase(phase.key), 'Nas folhas: ${phase.visualCheck}'),
-          ],
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              if (phase != null)
-                BusyButton(
-                  label: phase.finishes ? 'Finalizar cura' : 'Avançar fase',
-                  icon: phase.finishes ? Icons.check_circle : Icons.skip_next,
-                  style: phase.ready ? BusyButtonStyle.filled : BusyButtonStyle.outlined,
-                  onPressed: () => _advanceStage(phase),
-                ),
-              if (current.isDrying)
-                BusyButton(label: 'Parar secagem', icon: Icons.stop, style: BusyButtonStyle.danger, onPressed: _stopDrying)
-              else
-                BusyButton(
-                  label: current.isFinished ? 'Nova estufada' : 'Iniciar secagem',
-                  icon: Icons.play_arrow,
-                  onPressed: device == null ? null : () => _startDrying(current),
-                ),
-              TextButton.icon(
-                onPressed: () => openUnitCycles(context, current),
-                icon: const Icon(Icons.history),
-                label: const Text('Últimas secagens'),
-              ),
-            ],
-          ),
-          if (!current.isDrying && device == null) ...[
-            const SizedBox(height: 8),
-            Text('Vincule um sensor para iniciar.', style: TextStyle(fontSize: 13, color: c.muted)),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _chartCard(CuringUnit current, Limits limits) {
-    final data = series;
-    final unitPref = prefs.unit;
-    double convert(double value) => temperature ? f.tempValue(value, unitPref)! : value;
-    String format(double value) => temperature ? '${f.number(value)} ${f.unitSymbol(unitPref)}' : '${f.number(value)}%';
-    String show(double? value) => value == null ? '--' : format(convert(value));
-
-    final stats = data?.stats;
-    final phases = data == null ? const <ChartPhase>[] : chartPhasesOf(data, context.colors, temperature: temperature, unit: unitPref);
-    final points = [
-      for (final point in data?.points ?? const <SeriesPoint>[])
-        ChartPoint(
-          point.time,
-          convert(temperature ? point.temperature : point.humidity),
-          low: convert(temperature ? point.temperatureMin : point.humidityMin),
-          high: convert(temperature ? point.temperatureMax : point.humidityMax),
-          count: point.count,
-        ),
-    ];
-
-    Widget stat(String label, double? value) => Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: context.colors.muted)),
-              Text(show(value), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
-            ],
-          ),
-        );
-
-    return SectionCard(
-      title: 'Histórico',
-      icon: Icons.show_chart,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SegmentedButton<bool>(
-            segments: const [
-              ButtonSegment(value: true, label: Text('Temperatura'), icon: Icon(Icons.thermostat)),
-              ButtonSegment(value: false, label: Text('Umidade'), icon: Icon(Icons.water_drop_outlined)),
-            ],
-            selected: {temperature},
-            onSelectionChanged: (value) => setState(() => temperature = value.first),
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 4,
-            children: [
-              for (final item in _periods)
-                ChoiceChip(
-                  label: Text(item.label),
-                  selected: item == period,
-                  onSelected: (_) {
-                    if (item == period) return;
-                    setState(() => period = item);
-                    _loadSeries();
-                  },
-                ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Row(children: [
-            stat('Mínima', temperature ? stats?.temperatureMin : stats?.humidityMin),
-            stat('Média', temperature ? stats?.temperatureAvg : stats?.humidityAvg),
-            stat('Máxima', temperature ? stats?.temperatureMax : stats?.humidityMax),
-          ]),
-          const SizedBox(height: 12),
-          AnimatedOpacity(
-            opacity: seriesLoading ? 0.5 : 1,
-            duration: const Duration(milliseconds: 200),
-            child: data == null
-                ? const SizedBox(height: 220, child: Center(child: CircularProgressIndicator()))
-                : LineChart(
-                    points: points,
-                    start: data.since,
-                    end: data.until,
-                    // Com fases no período, cada uma desenha a própria faixa esperada.
-                    limitMin: phases.isNotEmpty ? null : (temperature ? f.tempValue(limits.tempMin, unitPref) : limits.humidityMin),
-                    limitMax: phases.isNotEmpty ? null : (temperature ? f.tempValue(limits.tempMax, unitPref) : limits.humidityMax),
-                    phases: phases,
-                    format: format,
-                    detail: (point) => point.count > 1 ? '${format(point.low!)} a ${format(point.high!)}' : '1 leitura',
-                    gap: Duration(seconds: (data.bucketSeconds * 3).clamp(300, 1 << 30)),
-                    height: 220,
-                    semanticLabel: '${temperature ? 'Temperatura' : 'Umidade'} nas últimas ${period.label}',
-                    emptyText: current.isDrying ? 'Sem leituras neste período.' : 'Sem leituras. Elas só são gravadas com a secagem ligada.',
-                  ),
-          ),
-          if (phases.length > 1) PhaseLegend(phases: phases),
-        ],
-      ),
-    );
-  }
-
-  Widget _outputsCard() {
-    final data = outputs;
-    if (data == null) return const SizedBox.shrink();
-    final last = data.lastBuzzer;
-    return SectionCard(
-      title: 'Saídas',
-      icon: Icons.power_outlined,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _OutputRow(
-            state: data.humidity,
-            confirmedAt: data.confirmedAt,
-            target: data.targetTemperature,
-            unit: prefs.unit,
-            onMode: (mode) => _setOutputMode('humidity', mode),
-            onEdit: () => _editOutput('humidity', data.humidity),
-            onEditTarget: _editTarget,
-          ),
-          const Divider(height: 28),
-          _OutputRow(
-            state: data.temperature,
-            confirmedAt: data.confirmedAt,
-            target: data.targetTemperature,
-            unit: prefs.unit,
-            onMode: (mode) => _setOutputMode('temperature', mode),
-            onEdit: () => _editOutput('temperature', data.temperature),
-            onEditTarget: _editTarget,
-          ),
-          if (last != null) ...[
             const SizedBox(height: 14),
-            Row(children: [
-              Icon(Icons.volume_up_outlined, size: 18, color: context.colors.muted),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  'Último aviso sonoro ${f.relative(last.timestamp)}: ${describeOutputEvent(last, prefs.unit)}',
-                  style: TextStyle(fontSize: 13, color: context.colors.textSecondary),
-                ),
-              ),
-            ]),
-          ],
-          if (data.events.isNotEmpty)
-            Theme(
-              data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-              child: ExpansionTile(
-                tilePadding: EdgeInsets.zero,
-                childrenPadding: EdgeInsets.zero,
-                title: const Text('Últimas mudanças', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                children: [
-                  for (final event in data.events)
-                    ListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      leading: Icon(event.turnedOn ? Icons.power : Icons.power_off, color: event.turnedOn ? context.scheme.primary : context.colors.muted),
-                      title: Text(describeOutputEvent(event, prefs.unit)),
-                      trailing: Text(f.relative(event.timestamp), style: TextStyle(color: context.colors.muted, fontSize: 12.5)),
-                    ),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _sensorCard() {
-    final current = device;
-    if (current == null) {
-      return SectionCard(
-        title: 'Sensor',
-        icon: Icons.sensors,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text('Nenhum sensor vinculado.', style: TextStyle(color: context.colors.textSecondary)),
-            const SizedBox(height: 12),
             Align(
               alignment: Alignment.centerLeft,
-              child: FilledButton.icon(onPressed: _linkDevice, icon: const Icon(Icons.link), label: const Text('Vincular sensor')),
+              child: BusyButton(
+                label: phase.finishes ? 'Finalizar cura' : 'Passar para ${phase.nextStage}',
+                icon: phase.finishes ? Icons.check_circle : Icons.skip_next,
+                style: phase.ready ? BusyButtonStyle.filled : BusyButtonStyle.outlined,
+                onPressed: () => _advanceStage(phase),
+              ),
             ),
           ],
-        ),
-      );
-    }
-    final signal = current.rssi == null
-        ? '--'
-        : '${current.signalQuality} (${current.rssi} dBm${current.snr == null ? '' : ' · SNR ${f.number(current.snr)}'})';
-    return SectionCard(
-      title: 'Sensor',
-      icon: Icons.sensors,
-      trailing: current.online
-          ? const StatusBadge(kind: StatusKind.ok, label: 'Online')
-          : const StatusBadge(kind: StatusKind.offline, label: 'Sem sinal', icon: Icons.cloud_off),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          DetailGrid(items: [
-            DetailItem(label: 'ID', value: current.code),
-            DetailItem(label: 'Último contato', value: f.relative(current.lastSeen)),
-            DetailItem(label: 'Sinal LoRa', value: signal),
-            DetailItem(label: 'Firmware', value: current.firmwareVersion ?? '--'),
-            if (current.battery != null) DetailItem(label: 'Bateria', value: '${current.battery}%${current.batteryLow ? ' (baixa)' : ''}'),
-            if (current.macAddress != null) DetailItem(label: 'MAC', value: current.macAddress!),
-          ]),
-          const SizedBox(height: 14),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              BusyButton(label: 'Verificar', icon: Icons.refresh, style: BusyButtonStyle.outlined, onPressed: () => _checkDevice(current)),
-              TextButton.icon(
-                onPressed: () => _unlinkDevice(current),
-                style: TextButton.styleFrom(foregroundColor: context.colors.crit),
-                icon: const Icon(Icons.link_off),
-                label: const Text('Desvincular'),
-              ),
-            ],
-          ),
         ],
       ),
     );
   }
-}
 
-class _OutputRow extends StatelessWidget {
-  const _OutputRow({
-    required this.state,
-    required this.confirmedAt,
-    required this.target,
-    required this.unit,
-    required this.onMode,
-    required this.onEdit,
-    required this.onEditTarget,
-  });
-
-  final OutputState state;
-  final DateTime? confirmedAt;
-
-  /// Temperatura alvo em °C; só aparece quando a saída segue o alvo.
-  final double? target;
-  final TempUnit unit;
-  final ValueChanged<String> onMode;
-  final VoidCallback onEdit;
-  final VoidCallback onEditTarget;
-
-  @override
-  Widget build(BuildContext context) {
-    final (IconData syncIcon, Color syncColor, String syncText) = switch (state) {
-      OutputState(inSync: true) => (Icons.verified, context.colors.ok, 'Confirmado pelo sensor'),
-      OutputState(confirmedOn: null) => (Icons.hourglass_empty, context.colors.muted, 'Sensor ainda não informou'),
-      OutputState(:final confirmedOn) when confirmedOn == state.on => (
-          Icons.history,
-          context.colors.muted,
-          'Confirmado ${f.relative(confirmedAt)}',
-        ),
-      _ => (Icons.sync, context.colors.warn, 'Aguardando o sensor aplicar'),
-    };
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(state.name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15.5), overflow: TextOverflow.ellipsis),
-                  Text('${state.relayLabel} · ${state.reason}', style: TextStyle(fontSize: 13, color: context.colors.textSecondary)),
-                ],
+  Widget _miniChart(CuringUnit current, Limits limits) {
+    final data = series;
+    final unitPref = prefs.unit;
+    String format(double value) => '${f.number(value)} ${f.unitSymbol(unitPref)}';
+    final points = [
+      for (final point in data?.points ?? const <SeriesPoint>[]) ChartPoint(point.time, f.tempValue(point.temperature, unitPref)!),
+    ];
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => UnitChartPage(unitId: widget.unitId, limits: limits, isDrying: current.isDrying),
+        )),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(children: [
+                const Expanded(child: Text('Temperatura nas últimas 24 h', style: TextStyle(fontWeight: FontWeight.w700))),
+                Text('Ver gráfico', style: TextStyle(fontSize: 13, color: context.colors.textSecondary)),
+                Icon(Icons.chevron_right, color: context.colors.muted),
+              ]),
+              const SizedBox(height: 8),
+              IgnorePointer(
+                child: data == null
+                    ? const SizedBox(height: 90)
+                    : LineChart(
+                        points: points,
+                        start: data.since,
+                        end: data.until,
+                        limitMin: current.phase == null ? null : f.tempValue(limits.tempMin, unitPref),
+                        limitMax: current.phase == null ? null : f.tempValue(limits.tempMax, unitPref),
+                        format: format,
+                        gap: Duration(seconds: (data.bucketSeconds * 3).clamp(300, 1 << 30)),
+                        height: 90,
+                        semanticLabel: 'Temperatura nas últimas 24 horas',
+                        emptyText: current.isDrying ? 'Sem leituras neste período.' : 'Sem leituras com a secagem parada.',
+                      ),
               ),
-            ),
-            StatusBadge(
-              kind: state.on ? StatusKind.info : StatusKind.neutral,
-              label: state.on ? 'Ligada' : 'Desligada',
-              icon: state.on ? Icons.power : Icons.power_off,
-            ),
-            IconButton(onPressed: onEdit, icon: const Icon(Icons.edit_outlined), tooltip: 'Editar nome e regra', visualDensity: VisualDensity.compact),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Row(children: [
-          Icon(syncIcon, size: 15, color: syncColor),
-          const SizedBox(width: 6),
-          Expanded(child: Text(syncText, style: TextStyle(fontSize: 12.5, color: syncColor))),
-        ]),
-        if (state.followsTarget) ...[
-          const SizedBox(height: 10),
-          _TargetRow(target: target, unit: unit, onEdit: onEditTarget),
-        ],
-        const SizedBox(height: 10),
-        SegmentedButton<String>(
-          segments: const [
-            ButtonSegment(value: 'auto', label: Text('Automático')),
-            ButtonSegment(value: 'on', label: Text('Ligada')),
-            ButtonSegment(value: 'off', label: Text('Desligada')),
-          ],
-          selected: {state.mode},
-          showSelectedIcon: false,
-          onSelectionChanged: (value) {
-            if (value.first != state.mode) onMode(value.first);
-          },
-        ),
-      ],
-    );
-  }
-}
-
-/// Temperatura alvo da ventoinha: o valor e o botão para mudar, ou o aviso para definir.
-class _TargetRow extends StatelessWidget {
-  const _TargetRow({required this.target, required this.unit, required this.onEdit});
-
-  final double? target;
-  final TempUnit unit;
-  final VoidCallback onEdit;
-
-  @override
-  Widget build(BuildContext context) {
-    final missing = target == null;
-    final c = context.colors;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
-      decoration: BoxDecoration(color: missing ? c.warnContainer : c.surface2, borderRadius: BorderRadius.circular(12)),
-      child: Row(
-        children: [
-          Icon(Icons.thermostat, size: 20, color: missing ? c.warn : context.scheme.primary),
-          const SizedBox(width: 8),
-          Expanded(
-            child: missing
-                ? Text('Defina a temperatura alvo', style: TextStyle(fontWeight: FontWeight.w600, color: c.onWarnContainer))
-                : Text.rich(TextSpan(children: [
-                    TextSpan(text: 'Alvo  ', style: TextStyle(color: c.textSecondary)),
-                    TextSpan(text: f.temp(target, unit), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
-                  ])),
+            ],
           ),
-          TextButton(onPressed: onEdit, child: Text(missing ? 'Definir' : 'Alterar')),
-        ],
+        ),
       ),
     );
   }

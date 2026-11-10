@@ -57,6 +57,8 @@ class PhaseStatus {
         overdue = json['overdue'] == true,
         nextStage = json['next_stage']?.toString() ?? finishedStage,
         ready = json['ready'] == true,
+        remainingMin = _double(json['remaining_hours_min']),
+        remainingMax = _double(json['remaining_hours_max']),
         checks = ((json['checks'] as List?) ?? const []).map((item) => PhaseCheck.fromJson(item as Map<String, dynamic>)).toList(),
         visualCheck = json['visual_check']?.toString() ?? '';
 
@@ -71,6 +73,10 @@ class PhaseStatus {
   final bool overdue;
   final String nextStage;
   final bool ready;
+
+  /// Horas que ainda faltam para o fim da cura; sempre uma faixa, porque depende das folhas.
+  final double? remainingMin;
+  final double? remainingMax;
   final List<PhaseCheck> checks;
   final String visualCheck;
 
@@ -207,7 +213,7 @@ class Reading {
 }
 
 /// Gravidades da API, da mais leve para a mais grave.
-const severityLabels = {'info': 'Informativo', 'warning': 'Atenção', 'critical': 'Crítico', 'emergency': 'Emergência'};
+const severityLabels = {'info': 'Para saber', 'warning': 'Fique de olho', 'critical': 'Vá à estufa agora', 'emergency': 'Vá à estufa agora'};
 
 class AlertItem {
   AlertItem.fromJson(Map<String, dynamic> json)
@@ -240,12 +246,17 @@ class AlertItem {
   /// Crítico ou emergência: pede ação imediata.
   bool get isCritical => severity == 'critical' || severity == 'emergency';
   bool get isEmergency => severity == 'emergency';
-  String get severityLabel => severityLabels[severity] ?? 'Atenção';
+  String get severityLabel => severityLabels[severity] ?? 'Fique de olho';
   /// Informativo não notifica nem muda a situação da estufa.
   bool get isInfo => severity == 'info';
   /// "Umidade alta" guarda o bulbo úmido estimado, que é uma temperatura.
   bool get isTemperature => type.startsWith('Temperatura') || type == 'Umidade alta';
   bool get isHigh => type.endsWith('alta');
+  bool get isWetBulb => type == 'Umidade alta';
+
+  /// Reconhecer esta queda aceita o novo nível de temperatura.
+  bool get isDrop => type == 'Temperatura em queda';
+  bool get isSensor => type == 'Sensor suspeito';
 }
 
 class SeriesPoint {
@@ -461,8 +472,6 @@ class OutputState {
 
   /// O sender informou há pouco o mesmo estado do comando.
   final bool inSync;
-
-  String get relayLabel => pin.isEmpty ? 'Relé $relay' : 'Relé $relay · $pin';
 
   /// No automático, segue a temperatura alvo (ventoinha).
   bool get followsTarget => trigger == 'temperature_target';

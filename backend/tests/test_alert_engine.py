@@ -258,7 +258,8 @@ def test_depression_waits_for_the_calculated_grace(unit_id):
     alert = sim.active()[DEPRESSION_HIGH_TYPE]
     assert alert.severity == "warning"
     assert alert.value is None and alert.threshold is None
-    assert "°F entre bulbo seco e úmido" in alert.message
+    assert "Feche o flap" in alert.message
+    assert "°" not in alert.message
 
 
 def test_depression_closes_below_the_margin(unit_id):
@@ -282,7 +283,7 @@ def test_frozen_sensor_suspends_the_process_rules(unit_id):
     sim.run(60, 38, 60, noise=False)
     active = sim.active()
     assert active[SENSOR_TYPE].severity == "warning"
-    assert "congelados" in active[SENSOR_TYPE].message
+    assert "parou de variar" in active[SENSOR_TYPE].message
     assert DEPRESSION_HIGH_TYPE not in active
 
 
@@ -307,7 +308,7 @@ def test_repeated_jumps_open_the_fault_and_ten_normal_minutes_close_it(unit_id):
     for _ in range(3):
         sim.run(20 / 60, 50, 35, step=2)
         sim.run(2 / 60, 70, 35, step=2, noise=False)
-    assert "Saltos" in sim.active()[SENSOR_TYPE].message
+    assert "pulando" in sim.active()[SENSOR_TYPE].message
     sim.run(9, 50, 35, step=5)
     assert SENSOR_TYPE in sim.active()
     sim.run(3, 50, 35, step=5)

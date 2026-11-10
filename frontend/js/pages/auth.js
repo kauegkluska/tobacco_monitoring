@@ -42,10 +42,7 @@ export function renderAuth({ onAuthenticated }) {
     return h(
       "p",
       { class: "auth-footer" },
-      "Servidor: ",
-      h("span", { class: "num" }, api.base),
-      " · ",
-      h("button", { class: "link-button", type: "button", onClick: openServerDialog }, "Alterar"),
+      h("button", { class: "link-button", type: "button", onClick: openServerDialog }, "Avançado"),
     );
   }
 
@@ -79,7 +76,7 @@ export function renderAuth({ onAuthenticated }) {
         },
       },
       error,
-      field({ label: "Login", input: login }),
+      field({ label: "Usuário", input: login }),
       field({ label: "Senha", input: password }),
       submit,
       h(
@@ -115,7 +112,7 @@ export function renderAuth({ onAuthenticated }) {
       },
       error,
       field({ label: "Seu nome", input: name }),
-      field({ label: "Login", input: login, hint: "Mínimo de 3 caracteres." }),
+      field({ label: "Usuário", input: login, hint: "Mínimo de 3 caracteres." }),
       field({ label: "Senha", input: password, hint: "Pelo menos 6 caracteres." }),
       submit,
     );
@@ -174,7 +171,7 @@ export function renderAuth({ onAuthenticated }) {
       },
       error,
       info,
-      field({ label: "Login", input: login }),
+      field({ label: "Usuário", input: login }),
       stepTwo,
       submit,
       h(
@@ -187,10 +184,10 @@ export function renderAuth({ onAuthenticated }) {
 
   function openServerDialog() {
     const input = h("input", { class: "input num", value: api.base, inputmode: "url", placeholder: "http://192.168.1.2:8000" });
-    const status = h("p", { class: "field-hint" }, "Endereço do computador que roda o servidor.");
+    const status = h("p", { class: "field-hint" }, "Só mude isto se o responsável pelo sistema pedir.");
     openModal({
-      title: "Endereço do servidor",
-      body: h("div", { class: "form" }, field({ label: "URL da API", input }), status),
+      title: "Endereço do monitor",
+      body: h("div", { class: "form" }, field({ label: "Endereço", input }), status),
       actions: [
         { label: "Cancelar" },
         {
@@ -198,9 +195,9 @@ export function renderAuth({ onAuthenticated }) {
           variant: "btn-primary",
           onClick: async (close) => {
             const ok = await api.testConnection(input.value);
-            if (!ok) throw new Error(`Não houve resposta de ${input.value}. Confira o endereço e se o backend está ligado.`);
+            if (!ok) throw new Error(`Não houve resposta de ${input.value}. Confira o endereço.`);
             api.setBase(input.value);
-            toast("Servidor conectado.", "success");
+            toast("Endereço salvo.", "success");
             close();
             render();
           },

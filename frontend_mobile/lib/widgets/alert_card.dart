@@ -7,11 +7,21 @@ import '../core/prefs.dart';
 import '../core/theme.dart';
 import 'common.dart';
 
-/// Reconhecer: o alerta continua ativo até o valor voltar à faixa.
+/// "Estou ciente": o alerta continua aberto até o valor voltar ao normal.
+/// Na queda de temperatura é diferente: aceita o novo nível e encerra, por isso pede confirmação.
 Future<bool> acknowledgeAlert(BuildContext context, ApiClient api, AlertItem alert) async {
+  if (alert.isDrop) {
+    final confirmed = await confirmAction(
+      context,
+      title: 'Você baixou de propósito?',
+      message: 'O alerta será encerrado e esta temperatura passa a ser a referência. Se a fornalha estiver apagando, não confirme.',
+      confirmLabel: 'Baixei de propósito',
+    );
+    if (!confirmed || !context.mounted) return false;
+  }
   try {
     await api.post('/alerts/${alert.id}/acknowledge');
-    if (context.mounted) showMessage(context, 'Alerta reconhecido.');
+    if (context.mounted) showMessage(context, 'Anotado.');
     return true;
   } on ApiException catch (exception) {
     if (context.mounted) showMessage(context, exception.message, error: true);
@@ -22,18 +32,103 @@ Future<bool> acknowledgeAlert(BuildContext context, ApiClient api, AlertItem ale
 Future<bool> resolveAlert(BuildContext context, ApiClient api, AlertItem alert) async {
   final confirmed = await confirmAction(
     context,
-    title: 'Resolver alerta?',
-    message: 'Se o valor continuar fora da faixa, um novo alerta abre na próxima leitura.',
-    confirmLabel: 'Resolver',
+    title: 'Encerrar este alerta?',
+    message: 'Use só se o problema já acabou. Se continuar, um novo alerta abre sozinho.',
+    confirmLabel: 'Encerrar',
   );
   if (!confirmed || !context.mounted) return false;
   try {
     await api.post('/alerts/${alert.id}/resolve');
-    if (context.mounted) showMessage(context, 'Alerta resolvido.');
+    if (context.mounted) showMessage(context, 'Alerta encerrado.');
     return true;
   } on ApiException catch (exception) {
     if (context.mounted) showMessage(context, exception.message, error: true);
     return false;
+  }
+}
+
+/// Detalhes técnicos do alerta: valores medidos e a opção de encerrar à mão.
+Future<void> showAlertDetails(
+  BuildContext context, {
+  required AlertItem alert,
+  required TempUnit unit,
+  Future<void> Function()? onResolve,
+}) {
+  String value(double? number) {
+    if (number == null) return '--';
+    return alert.isTemperature ? f.temp(number, unit) : f.humidity(number);
+  }
+
+  final limitLabel = alert.isDrop ? 'Alerta abaixo de' : (alert.isHigh ? 'Máximo' : 'Mínimo');
+  return showFormSheet<void>(
+    context,
+    title: alert.type,
+    builder: (sheetContext) => Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(alert.message, style: const TextStyle(fontSize: 15)),
+        const SizedBox(height: 14),
+        DetailGrid(items: [
+          DetailItem(label: 'Quando', value: f.relative(alert.timestamp)),
+          if (alert.value != null) DetailItem(label: alert.isWetBulb ? 'Bulbo úmido' : 'Valor', value: value(alert.value)),
+          if (alert.threshold != null) DetailItem(label: limitLabel, value: value(alert.threshold)),
+          if (alert.resolvedAt != null) DetailItem(label: 'Encerrado', value: f.fullDate(alert.resolvedAt)),
+        ]),
+        if (alert.isActive && onResolve != null && !alert.isInfo) ...[
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              onPressed: () async {
+                Navigator.pop(sheetContext);
+                await onResolve();
+              },
+              child: const Text('Encerrar alerta'),
+            ),
+          ),
+        ],
+      ],
+    ),
+  );
+}
+
+/// Ações de um alerta: um botão principal e o acesso aos detalhes.
+class AlertActions extends StatelessWidget {
+  const AlertActions({
+    required this.alert,
+    required this.unit,
+    required this.onAcknowledge,
+    required this.onResolve,
+    this.onOpenUnit,
+    super.key,
+  });
+
+  final AlertItem alert;
+  final TempUnit unit;
+  final Future<void> Function() onAcknowledge;
+  final Future<void> Function() onResolve;
+  final VoidCallback? onOpenUnit;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        if (alert.isActive && alert.acknowledgedAt == null && !alert.isInfo)
+          BusyButton(
+            label: alert.isDrop ? 'Baixei de propósito' : 'Estou ciente',
+            icon: Icons.check,
+            onPressed: onAcknowledge,
+          ),
+        TextButton(
+          onPressed: () => showAlertDetails(context, alert: alert, unit: unit, onResolve: onResolve),
+          child: const Text('Ver detalhes'),
+        ),
+        if (onOpenUnit != null) TextButton(onPressed: onOpenUnit, child: const Text('Abrir estufa')),
+      ],
+    );
   }
 }
 
@@ -55,25 +150,21 @@ class AlertCard extends StatelessWidget {
   final VoidCallback? onOpenUnit;
   final bool showUnitName;
 
-  String _value(double? value) {
-    if (value == null) return '--';
-    return alert.isTemperature ? f.temp(value, unit) : f.humidity(value);
-  }
-
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
     final (accent, icon) = !alert.isActive
-        ? (c.ok, Icons.check_circle)
+        ? (c.muted, Icons.check_circle_outline)
         : alert.isCritical
             ? (c.crit, Icons.error)
-            : (c.warn, Icons.warning_amber_rounded);
+            : alert.isInfo
+                ? (c.textSecondary, Icons.info_outline)
+                : (c.warn, Icons.warning_amber_rounded);
     final status = !alert.isActive
-        ? 'Resolvido'
+        ? 'Encerrado'
         : alert.acknowledgedAt != null
-            ? '${alert.severityLabel} · reconhecido'
+            ? '${alert.severityLabel} · ciente'
             : alert.severityLabel;
-    final hasValues = alert.value != null && alert.threshold != null;
 
     return Card(
       clipBehavior: Clip.antiAlias,
@@ -103,35 +194,18 @@ class AlertCard extends StatelessWidget {
                       showUnitName ? '${alert.type} · ${alert.unitName ?? 'Estufa ${alert.unitId}'}' : alert.type,
                       style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
                     ),
-                    if (hasValues) ...[
-                      const SizedBox(height: 2),
-                      Text.rich(
-                        TextSpan(children: [
-                          TextSpan(text: _value(alert.value), style: TextStyle(fontWeight: FontWeight.w700, color: alert.isActive ? c.crit : null)),
-                          TextSpan(text: '  ·  limite ${_value(alert.threshold)}', style: TextStyle(color: c.textSecondary)),
-                        ]),
-                      ),
-                    ],
                     if (alert.message.isNotEmpty) ...[
                       const SizedBox(height: 4),
-                      Text(alert.message, style: TextStyle(fontSize: 13.5, color: c.textSecondary)),
+                      Text(alert.message, style: TextStyle(fontSize: 14.5, color: c.textSecondary)),
                     ],
-                    if (!alert.isActive && alert.resolvedAt != null) ...[
-                      const SizedBox(height: 4),
-                      Text('Encerrado em ${f.fullDate(alert.resolvedAt)}', style: TextStyle(fontSize: 12.5, color: c.muted)),
-                    ],
-                    if (alert.isActive || onOpenUnit != null) ...[
-                      const SizedBox(height: 10),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          if (alert.isActive) BusyButton(label: 'Resolver', icon: Icons.check, onPressed: onResolve),
-                          if (alert.isActive && alert.acknowledgedAt == null)
-                            BusyButton(label: 'Reconhecer', icon: Icons.done_all, style: BusyButtonStyle.outlined, onPressed: onAcknowledge),
-                          if (onOpenUnit != null)
-                            TextButton.icon(onPressed: onOpenUnit, icon: const Icon(Icons.chevron_right), label: const Text('Abrir estufa')),
-                        ],
+                    if (!alert.isInfo || onOpenUnit != null) ...[
+                      const SizedBox(height: 8),
+                      AlertActions(
+                        alert: alert,
+                        unit: unit,
+                        onAcknowledge: onAcknowledge,
+                        onResolve: onResolve,
+                        onOpenUnit: onOpenUnit,
                       ),
                     ],
                   ],

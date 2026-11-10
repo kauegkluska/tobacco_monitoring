@@ -71,14 +71,14 @@ export function isSevere(alert) {
 
 /** Gravidades da API, da mais grave para a mais leve. */
 export const SEVERITIES = [
-  { value: "emergency", label: "Emergência" },
-  { value: "critical", label: "Crítico" },
-  { value: "warning", label: "Atenção" },
-  { value: "info", label: "Informativo" },
+  { value: "emergency", label: "Vá à estufa agora" },
+  { value: "critical", label: "Vá à estufa agora" },
+  { value: "warning", label: "Fique de olho" },
+  { value: "info", label: "Para saber" },
 ];
 
 export function severityLabel(alert) {
-  return SEVERITIES.find((item) => item.value === alert.severity)?.label || "Atenção";
+  return SEVERITIES.find((item) => item.value === alert.severity)?.label || "Fique de olho";
 }
 
 export function signalQuality(rssi) {

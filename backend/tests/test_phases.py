@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from conftest import Sim, add_past_readings, send_reading, set_stage, shift_stage_start
 from core.clock import utcnow
 from core.database import SessionLocal
@@ -88,7 +90,7 @@ def test_yellowing_alarm_needs_ten_minutes(client, auth, drying_unit):
     send_reading(client, 41.0, 85.0)
     alert = active_alerts(client, auth)["Temperatura alta"]
     assert alert["severity"] == "warning"
-    assert "na fase de Amarelação por 10 min." in alert["message"]
+    assert "na fase de Amarelação" in alert["message"]
 
 
 def test_one_normal_reading_does_not_cancel_the_alarm(client, auth, drying_unit):
@@ -113,8 +115,8 @@ def test_fast_heating_is_reported_in_wilting(client, auth, drying_unit):
     # Fica como informativo até medir a oscilação real da fornalha.
     assert alert["severity"] == "info"
     assert alert["value"] is None
-    # Mensagem em °F, como o resto da interface (limite de 0,8 °C/h = 1,4 °F/h).
-    assert "Máximo: 1,4 °F/h." in alert["message"]
+    # Sem número fixo no texto: a mensagem vale para quem usa °C ou °F.
+    assert "°" not in alert["message"]
 
 
 def test_below_range_waits_for_the_warm_up(client, auth, drying_unit):
@@ -163,6 +165,9 @@ def test_ready_to_advance_after_time_and_conditions(client, auth, drying_unit):
     phase = client.get(f"/curing_units/{unit_id}", headers=auth).json()["phase"]
     # As 25 h não bastam mais: o mínimo para sugerir a próxima fase é 48 h.
     assert phase["ready"] is False
+    # 23 a 35 h na fase, mais o mínimo e o máximo das três seguintes.
+    assert phase["remaining_hours_min"] == pytest.approx(23 + 18 + 24 + 18, abs=0.1)
+    assert phase["remaining_hours_max"] == pytest.approx(35 + 24 + 60 + 48, abs=0.1)
 
     shift_stage_start(unit_id, hours=24)
     send_reading(client, 38.5, 86.0)

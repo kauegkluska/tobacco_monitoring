@@ -12,7 +12,7 @@ import '../widgets/common.dart';
 import '../widgets/server_dialog.dart';
 import 'shell.dart';
 
-/// Ajustes: exibição, avisos, conta, servidor e legenda das situações.
+/// Ajustes: avisos, exibição, conta e, escondido em Avançado, o endereço do monitor.
 class SettingsPage extends StatefulWidget {
   const SettingsPage({required this.actions, super.key});
 
@@ -131,7 +131,7 @@ class _SettingsPageState extends State<SettingsPage> with WidgetsBindingObserver
       showMessage(context, 'Este já é o servidor em uso.');
       return;
     }
-    showMessage(context, 'Servidor salvo. Entre novamente.');
+    showMessage(context, 'Endereço salvo. Entre novamente.');
     await widget.actions.logout();
   }
 
@@ -163,6 +163,8 @@ class _SettingsPageState extends State<SettingsPage> with WidgetsBindingObserver
           child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
             children: [
+              _noticesCard(),
+              const SizedBox(height: 12),
               SectionCard(
                 title: 'Exibição',
                 icon: Icons.palette_outlined,
@@ -195,12 +197,10 @@ class _SettingsPageState extends State<SettingsPage> with WidgetsBindingObserver
                 ),
               ),
               const SizedBox(height: 12),
-              _noticesCard(),
-              const SizedBox(height: 12),
               SectionCard(
                 title: 'Conta',
                 icon: Icons.person_outline,
-                subtitle: 'Login: ${profile.login}',
+                subtitle: 'Usuário: ${profile.login}',
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -217,34 +217,37 @@ class _SettingsPageState extends State<SettingsPage> with WidgetsBindingObserver
                 ),
               ),
               const SizedBox(height: 12),
-              SectionCard(
-                title: 'Servidor',
-                icon: Icons.dns_outlined,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    TextField(
-                      controller: _server,
-                      keyboardType: TextInputType.url,
-                      autocorrect: false,
-                      decoration: const InputDecoration(labelText: 'Endereço da API', hintText: 'http://192.168.1.2:8000'),
-                    ),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      alignment: WrapAlignment.end,
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        if (discoverySupported)
-                          OutlinedButton.icon(onPressed: _searchServer, icon: const Icon(Icons.wifi_find), label: const Text('Procurar na rede')),
-                        BusyButton(label: 'Testar e salvar', onPressed: _saveServer),
-                      ],
-                    ),
-                  ],
+              Card(
+                child: Theme(
+                  data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                  child: ExpansionTile(
+                    leading: const Icon(Icons.tune),
+                    title: const Text('Avançado', style: TextStyle(fontWeight: FontWeight.w600)),
+                    childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    children: [
+                      Text('Só mude isto se o responsável pelo sistema pedir.', style: TextStyle(fontSize: 13, color: context.colors.textSecondary)),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: _server,
+                        keyboardType: TextInputType.url,
+                        autocorrect: false,
+                        decoration: const InputDecoration(labelText: 'Endereço do monitor', hintText: 'http://192.168.1.2:8000'),
+                      ),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        alignment: WrapAlignment.end,
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          if (discoverySupported)
+                            OutlinedButton.icon(onPressed: _searchServer, icon: const Icon(Icons.wifi_find), label: const Text('Procurar no Wi-Fi')),
+                          BusyButton(label: 'Testar e salvar', onPressed: _saveServer),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
-              const SizedBox(height: 12),
-              const _LegendCard(),
               const SizedBox(height: 18),
               BusyButton(label: 'Sair da conta', icon: Icons.logout, style: BusyButtonStyle.danger, onPressed: widget.actions.logout),
             ],
@@ -267,8 +270,8 @@ class _SettingsPageState extends State<SettingsPage> with WidgetsBindingObserver
             contentPadding: EdgeInsets.zero,
             value: prefs.phoneBuzzer,
             onChanged: prefs.setPhoneBuzzer,
-            title: const Text('Tocar no celular', style: TextStyle(fontWeight: FontWeight.w600)),
-            subtitle: const Text('Bipa e vibra quando uma saída liga.'),
+            title: const Text('Apitar no celular', style: TextStyle(fontWeight: FontWeight.w600)),
+            subtitle: const Text('Apita e vibra quando a ventoinha ou o flap ligar.'),
           ),
           Align(
             alignment: Alignment.centerLeft,
@@ -283,7 +286,7 @@ class _SettingsPageState extends State<SettingsPage> with WidgetsBindingObserver
               value: enabled,
               onChanged: backgroundBusy ? null : _toggleBackground,
               title: const Text('Avisar com o app fechado', style: TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: const Text('Notifica alertas e acionamentos. O Android mostra o aviso fixo "Estufa monitorada".'),
+              subtitle: const Text('Recomendado. Sem isto, os alertas só aparecem com o app aberto.'),
             ),
             if (status != null && !status.permissionGranted)
               const _Fix(text: 'Notificações bloqueadas', action: 'Permitir', onPressed: BackgroundMonitor.openNotificationSettings),
@@ -324,42 +327,5 @@ class _Fix extends StatelessWidget {
       Expanded(child: Text(text, style: const TextStyle(fontSize: 13.5))),
       TextButton(onPressed: onPressed, child: Text(action)),
     ]);
-  }
-}
-
-/// O que significa cada situação mostrada nas estufas e nos alertas.
-class _LegendCard extends StatelessWidget {
-  const _LegendCard();
-
-  @override
-  Widget build(BuildContext context) {
-    const items = [
-      (StatusKind.ok, 'Normal', Icons.check, 'Temperatura e umidade dentro do esperado para a fase.'),
-      (StatusKind.warn, 'Fora da faixa', Icons.swap_vert, 'Algum valor saiu do esperado, ainda sem alerta.'),
-      (StatusKind.warn, 'Atenção', Icons.warning_amber_rounded, 'Alerta aberto. Acompanhe a estufa.'),
-      (StatusKind.crit, 'Crítico', Icons.error, 'Risco para a cura. Aja agora.'),
-      (StatusKind.offline, 'Sem sinal', Icons.cloud_off, 'O sensor não envia leituras há mais de 90 s.'),
-      (StatusKind.neutral, 'Parada', Icons.pause, 'Secagem desligada: nada é gravado e não há alertas.'),
-    ];
-    return SectionCard(
-      title: 'Legenda',
-      icon: Icons.help_outline,
-      child: Column(
-        children: [
-          for (final (kind, label, icon, text) in items)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SizedBox(width: 130, child: Align(alignment: Alignment.centerLeft, child: StatusBadge(kind: kind, label: label, icon: icon))),
-                  const SizedBox(width: 8),
-                  Expanded(child: Text(text, style: TextStyle(fontSize: 13.5, color: context.colors.textSecondary))),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
   }
 }

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../core/api.dart';
 import '../core/app_scope.dart';
-import '../core/discovery.dart';
 import '../core/theme.dart';
 import '../widgets/common.dart';
 import '../widgets/server_dialog.dart';
@@ -32,13 +31,6 @@ class _LoginPageState extends State<LoginPage> {
   bool showPassword = false;
   String? error;
   String? info;
-  bool searchingServer = false;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _autoDiscover());
-  }
 
   @override
   void dispose() {
@@ -84,7 +76,7 @@ class _LoginPageState extends State<LoginPage> {
               if (token != null) _code.text = token;
               info = token != null
                   ? 'Código preenchido abaixo (modo de desenvolvimento). Vale por 15 min.'
-                  : 'Se o login existir, o código foi enviado ao responsável pelo sistema. Vale por 15 min.';
+                  : 'Se o usuário existir, o código foi enviado ao responsável pelo sistema. Vale por 15 min.';
             });
           } else {
             await api.postPublic('/auth/password-reset/confirm', {
@@ -108,25 +100,11 @@ class _LoginPageState extends State<LoginPage> {
     final saved = await showServerDialog(context, AppScope.of(context).api);
     if (saved == null || !mounted) return;
     setState(() {});
-    showMessage(context, 'Servidor conectado.');
-  }
-
-  /// Na primeira abertura, procura o servidor na rede em vez de pedir o IP.
-  Future<void> _autoDiscover() async {
-    final api = AppScope.of(context).api;
-    if (!discoverySupported || api.hasSavedBaseUrl) return;
-    setState(() => searchingServer = true);
-    final found = await discoverAndSave(api);
-    if (!mounted) return;
-    setState(() {
-      searchingServer = false;
-      if (found != null) info = 'Servidor encontrado na rede: ${Uri.parse(found).authority}.';
-    });
+    showMessage(context, 'Endereço salvo.');
   }
 
   @override
   Widget build(BuildContext context) {
-    final api = AppScope.of(context).api;
     final titles = {
       _AuthMode.login: 'Entrar',
       _AuthMode.register: 'Criar conta',
@@ -206,12 +184,12 @@ class _LoginPageState extends State<LoginPage> {
                             autocorrect: false,
                             autofillHints: const [AutofillHints.username],
                             decoration: InputDecoration(
-                              labelText: 'Login',
+                              labelText: 'Usuário',
                               helperText: mode == _AuthMode.register ? 'Pelo menos 3 caracteres. Você vai usar para entrar.' : null,
                             ),
                             validator: (value) {
                               final text = (value ?? '').trim();
-                              if (text.isEmpty) return 'Informe o login.';
+                              if (text.isEmpty) return 'Informe o usuário.';
                               if (mode == _AuthMode.register && text.length < 3) return 'Use pelo menos 3 caracteres.';
                               return null;
                             },
@@ -261,20 +239,9 @@ class _LoginPageState extends State<LoginPage> {
                             onPressed: () => _switch(mode == _AuthMode.forgot ? _AuthMode.login : _AuthMode.forgot),
                             child: Text(mode == _AuthMode.forgot ? 'Voltar para o login' : 'Esqueci minha senha'),
                           ),
-                          const Divider(height: 24),
-                          Row(
-                            children: [
-                              Icon(Icons.dns_outlined, size: 18, color: context.colors.muted),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  searchingServer ? 'Procurando o servidor na rede…' : api.baseUrl,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(color: context.colors.muted, fontSize: 13),
-                                ),
-                              ),
-                              TextButton(onPressed: _editServer, child: const Text('Alterar')),
-                            ],
+                          TextButton(
+                            onPressed: _editServer,
+                            child: Text('Avançado', style: TextStyle(color: context.colors.muted, fontSize: 13)),
                           ),
                         ],
                       ),

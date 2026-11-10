@@ -9,13 +9,14 @@ import '../core/models.dart';
 import '../core/prefs.dart';
 import '../core/theme.dart';
 import '../widgets/common.dart';
+import '../widgets/decision.dart';
 import '../widgets/phases.dart';
 import '../widgets/unit_forms.dart';
 import '../widgets/unit_widgets.dart';
 import 'shell.dart';
 import 'unit_page.dart';
 
-/// Tela inicial: uma linha por estufa com temperatura, umidade e situação.
+/// Aba Estufa: com uma só, abre direto nela; com várias, lista da mais urgente para a mais tranquila.
 class UnitsPage extends StatefulWidget {
   const UnitsPage({required this.actions, super.key});
 
@@ -27,6 +28,8 @@ class UnitsPage extends StatefulWidget {
 
 class _UnitsPageState extends State<UnitsPage> {
   static const _pollInterval = Duration(seconds: 5);
+  // Com a estufa aberta direto, ela mesma já consulta o servidor.
+  static const _singleUnitInterval = Duration(seconds: 30);
 
   Overview? data;
   String? error;
@@ -34,6 +37,9 @@ class _UnitsPageState extends State<UnitsPage> {
 
   ApiClient get api => AppScope.of(context).api;
   AppPrefs get prefs => AppScope.of(context).prefs;
+
+  bool _opensDirectly(Overview overview) =>
+      overview.units.length == 1 && overview.devices.every((device) => device.unitId != null);
 
   @override
   void initState() {
@@ -60,7 +66,8 @@ class _UnitsPageState extends State<UnitsPage> {
     } on ApiException catch (exception) {
       if (mounted && data == null) setState(() => error = exception.message);
     } finally {
-      if (mounted) timer = Timer(_pollInterval, _load);
+      final overview = data;
+      if (mounted) timer = Timer(overview != null && _opensDirectly(overview) ? _singleUnitInterval : _pollInterval, _load);
     }
   }
 
@@ -94,90 +101,130 @@ class _UnitsPageState extends State<UnitsPage> {
     }
   }
 
+  Decision _decisionOf(CuringUnit unit, Overview overview, bool connected) => decide(
+        unit: unit,
+        device: overview.deviceFor(unit),
+        latest: unit.latest,
+        connected: connected,
+        warnings: unit.activeAlerts,
+        criticals: unit.criticalAlerts,
+      );
+
   @override
   Widget build(BuildContext context) {
-    if (error != null) return ErrorView(title: 'Não foi possível carregar as estufas', message: error!, onRetry: _load);
     final overview = data;
-    if (overview == null) return const LoadingView();
-    final loose = overview.devices.where((device) => device.unitId == null).toList();
-
-    return ListenableBuilder(
-      listenable: prefs,
-      builder: (context, _) => RefreshIndicator(
-        onRefresh: _load,
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
-          children: [
-            if (overview.units.isEmpty)
-              SectionCard(
-                child: EmptyState(
-                  icon: Icons.warehouse_outlined,
-                  title: 'Nenhuma estufa',
-                  message: 'Cadastre a estufa e vincule o sensor dela.',
-                  action: FilledButton.icon(onPressed: _create, icon: const Icon(Icons.add), label: const Text('Nova estufa')),
+    if (overview != null && _opensDirectly(overview)) {
+      final only = overview.units.single;
+      return UnitPage(key: ValueKey(only.id), unitId: only.id, onGone: _load, onCreateUnit: _create);
+    }
+    return Scaffold(
+      appBar: AppBar(
+        titleSpacing: 16,
+        title: const Text('Estufas', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
+      ),
+      body: error != null
+          ? ErrorView(title: 'Não foi possível carregar as estufas', message: error!, onRetry: _load)
+          : overview == null
+              ? const LoadingView()
+              : AnimatedBuilder(
+                  animation: Listenable.merge([prefs, api.online]),
+                  builder: (context, _) => _list(overview),
                 ),
-              )
-            else
-              LayoutBuilder(builder: (context, constraints) {
-                final columns = constraints.maxWidth >= 720 ? 2 : 1;
-                final width = (constraints.maxWidth - 12 * (columns - 1)) / columns;
-                return Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  children: [
-                    for (final unit in overview.units)
-                      SizedBox(width: width, child: _UnitCard(unit: unit, device: overview.deviceFor(unit), tempUnit: prefs.unit, onTap: () => _open(unit.id))),
-                  ],
-                );
-              }),
-            if (overview.units.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: OutlinedButton.icon(onPressed: _create, icon: const Icon(Icons.add), label: const Text('Nova estufa')),
-              ),
-            ],
-            if (loose.isNotEmpty) ...[
-              const SizedBox(height: 24),
-              Text('Sensores sem estufa', style: context.text.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
-              const SizedBox(height: 8),
-              Card(
-                child: Column(children: [
-                  for (final device in loose)
-                    ListTile(
-                      leading: Icon(Icons.sensors, color: device.online ? context.colors.ok : context.colors.muted),
-                      title: Text(device.code),
-                      subtitle: Text(device.online ? 'Online' : 'Último contato ${f.relative(device.lastSeen)}'),
-                      trailing: IconButton(tooltip: 'Desvincular', icon: const Icon(Icons.link_off), onPressed: () => _unlink(device)),
-                    ),
-                ]),
-              ),
-            ],
+    );
+  }
+
+  Widget _list(Overview overview) {
+    final connected = api.online.value;
+    final loose = overview.devices.where((device) => device.unitId == null).toList();
+    final units = [...overview.units]
+      ..sort((a, b) => _decisionOf(a, overview, connected).rank.compareTo(_decisionOf(b, overview, connected).rank));
+
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        children: [
+          if (!connected) ...[
+            const StatusBanner(
+              kind: StatusKind.offline,
+              icon: Icons.cloud_off,
+              title: 'Sem conexão com o monitor',
+              text: 'Os números abaixo podem estar velhos. Confira a internet do celular.',
+            ),
+            const SizedBox(height: 12),
           ],
-        ),
+          if (units.isEmpty)
+            SectionCard(
+              child: EmptyState(
+                icon: Icons.warehouse_outlined,
+                title: 'Nenhuma estufa',
+                message: 'Cadastre a estufa e vincule o sensor dela.',
+                action: FilledButton.icon(onPressed: _create, icon: const Icon(Icons.add), label: const Text('Nova estufa')),
+              ),
+            )
+          else
+            LayoutBuilder(builder: (context, constraints) {
+              final columns = constraints.maxWidth >= 720 ? 2 : 1;
+              final width = (constraints.maxWidth - 12 * (columns - 1)) / columns;
+              return Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  for (final unit in units)
+                    SizedBox(
+                      width: width,
+                      child: _UnitCard(
+                        unit: unit,
+                        device: overview.deviceFor(unit),
+                        tempUnit: prefs.unit,
+                        decision: _decisionOf(unit, overview, connected),
+                        onTap: () => _open(unit.id),
+                      ),
+                    ),
+                ],
+              );
+            }),
+          if (loose.isNotEmpty) ...[
+            const SizedBox(height: 24),
+            Text('Sensores sem estufa', style: context.text.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            Card(
+              child: Column(children: [
+                for (final device in loose)
+                  ListTile(
+                    leading: Icon(Icons.sensors, color: device.online ? context.colors.ok : context.colors.muted),
+                    title: Text(device.code),
+                    subtitle: Text(device.online ? 'Respondendo' : 'Último contato ${f.relative(device.lastSeen)}'),
+                    trailing: IconButton(tooltip: 'Desvincular', icon: const Icon(Icons.link_off), onPressed: () => _unlink(device)),
+                  ),
+              ]),
+            ),
+          ],
+          if (units.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(onPressed: _create, icon: const Icon(Icons.add), label: const Text('Nova estufa')),
+            ),
+          ],
+        ],
       ),
     );
   }
 }
 
 class _UnitCard extends StatelessWidget {
-  const _UnitCard({required this.unit, required this.device, required this.tempUnit, required this.onTap});
+  const _UnitCard({required this.unit, required this.device, required this.tempUnit, required this.decision, required this.onTap});
 
   final CuringUnit unit;
   final Device? device;
   final TempUnit tempUnit;
+  final Decision decision;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final latest = unit.latest;
-    final status = unitStatus(
-      unit: unit,
-      device: device,
-      latest: latest,
-      activeAlerts: unit.activeAlerts,
-      criticalAlerts: unit.criticalAlerts,
-    );
     final stale = isStale(latest, unit, device);
     final limits = unit.phase == null ? null : unit.limitsWith(device);
     final phase = unit.phase;
@@ -201,7 +248,10 @@ class _UnitCard extends StatelessWidget {
                   Expanded(
                     child: Text(unit.name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
                   ),
-                  StatusBadge(kind: status.kind, label: status.label, icon: status.icon),
+                  GestureDetector(
+                    onTap: () => showStatusLegend(context),
+                    child: StatusBadge(kind: decision.kind, label: decision.short, icon: decision.icon),
+                  ),
                   Icon(Icons.chevron_right, color: c.muted),
                 ],
               ),

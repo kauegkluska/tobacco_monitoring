@@ -5,22 +5,13 @@ import '../core/discovery.dart';
 import '../core/theme.dart';
 import 'common.dart';
 
-/// Escolha do servidor: procura na rede Wi-Fi ou digita o endereço.
+/// Configuração avançada do endereço do monitor; o app já vem com o servidor certo.
 /// Devolve o endereço salvo, ou nulo se o usuário cancelar.
 Future<String?> showServerDialog(BuildContext context, ApiClient api, {bool searchOnOpen = false}) {
   return showDialog<String>(
     context: context,
     builder: (_) => _ServerDialog(api: api, searchOnOpen: searchOnOpen),
   );
-}
-
-/// Procura um servidor e, se houver um só, já o salva. Devolve o endereço salvo ou nulo.
-Future<String?> discoverAndSave(ApiClient api) async {
-  if (!discoverySupported) return null;
-  final servers = await discoverServers();
-  if (servers.length != 1) return null;
-  await api.setBaseUrl(servers.single.baseUrl);
-  return servers.single.baseUrl;
 }
 
 class _ServerDialog extends StatefulWidget {
@@ -68,7 +59,7 @@ class _ServerDialogState extends State<_ServerDialog> {
     final ok = await widget.api.testConnection(url);
     if (!mounted) return;
     if (!ok) {
-      setState(() => error = 'Não houve resposta de $url. Confira o endereço e se o backend está ligado.');
+      setState(() => error = 'Não houve resposta de $url. Confira o endereço.');
       return;
     }
     await widget.api.setBaseUrl(url);
@@ -79,7 +70,7 @@ class _ServerDialogState extends State<_ServerDialog> {
   Widget build(BuildContext context) {
     final found = servers;
     return AlertDialog(
-      title: const Text('Servidor'),
+      title: const Text('Endereço do monitor'),
       scrollable: true,
       content: Column(
         mainAxisSize: MainAxisSize.min,
@@ -88,7 +79,7 @@ class _ServerDialogState extends State<_ServerDialog> {
           FormErrorText(error),
           if (discoverySupported) ...[
             Text(
-              'Com o celular no mesmo Wi-Fi do computador, o app encontra o servidor sozinho.',
+              'Só mude isto se o responsável pelo sistema pedir.',
               style: TextStyle(color: context.colors.textSecondary),
             ),
             const SizedBox(height: 12),
@@ -99,7 +90,7 @@ class _ServerDialogState extends State<_ServerDialog> {
                   children: [
                     SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
                     SizedBox(width: 12),
-                    Expanded(child: Text('Procurando na rede… (até 15 s)')),
+                    Expanded(child: Text('Procurando no Wi-Fi… (até 15 s)')),
                   ],
                 ),
               )
@@ -107,14 +98,13 @@ class _ServerDialogState extends State<_ServerDialog> {
               OutlinedButton.icon(
                 onPressed: _search,
                 icon: const Icon(Icons.wifi_find),
-                label: Text(found == null ? 'Procurar na rede' : 'Procurar de novo'),
+                label: Text(found == null ? 'Procurar no Wi-Fi' : 'Procurar de novo'),
               ),
             if (found != null && !searching) ...[
               const SizedBox(height: 8),
               if (found.isEmpty)
                 Text(
-                  'Nenhum servidor encontrado. Confira se o backend está ligado, se o celular está no mesmo Wi-Fi '
-                  'e se o Firewall do Windows permite o Python em redes privadas.',
+                  'Nenhum monitor encontrado neste Wi-Fi.',
                   style: TextStyle(fontSize: 13, color: context.colors.warn),
                 )
               else
@@ -138,12 +128,7 @@ class _ServerDialogState extends State<_ServerDialog> {
             controller: controller,
             keyboardType: TextInputType.url,
             autocorrect: false,
-            decoration: const InputDecoration(labelText: 'URL da API', hintText: 'http://192.168.0.14:8000'),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'IP do computador que roda o backend. No emulador Android, o computador é 10.0.2.2.',
-            style: TextStyle(fontSize: 12.5, color: context.colors.muted),
+            decoration: const InputDecoration(labelText: 'Endereço', hintText: 'http://192.168.0.14:8000'),
           ),
         ],
       ),

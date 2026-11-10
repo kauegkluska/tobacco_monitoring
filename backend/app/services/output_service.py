@@ -179,7 +179,7 @@ def _reason(unit: CuringUnit, output: str) -> str:
     if trigger_of(unit, output) == "temperature_target" and unit.target_temperature is None:
         return "Desligada: defina a temperatura alvo."
     if on:
-        return f"Ligada: {because}."
+        return f"Ligada porque {because}."
     return f"Liga quando {when}."
 
 

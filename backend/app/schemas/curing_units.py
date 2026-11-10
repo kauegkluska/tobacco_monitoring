@@ -52,6 +52,8 @@ class PhaseStatus(BaseModel):
     overdue: bool
     next_stage: str
     ready: bool
+    remaining_hours_min: float = 0
+    remaining_hours_max: float = 0
     checks: list[PhaseCheck]
     visual_check: str
 

@@ -45,6 +45,8 @@ export function renderUnits(ctx) {
       if (!document.querySelector("dialog[open]")) draw();
     } catch (error) {
       if (destroyed) return;
+      // Sem conexão, os cartões deixam de dizer que está tudo bem.
+      if (data && !document.querySelector("dialog[open]")) draw();
       if (!data) clear(root, banner("crit", "cloudOff", "Não foi possível carregar as estufas", error.message, [button("Tentar de novo", { onClick: load })]));
     } finally {
       if (!destroyed) {
@@ -58,11 +60,14 @@ export function renderUnits(ctx) {
     const { units, devices, devicesById } = data;
     const loose = devices.filter((device) => !device.curing_unit_id);
     const add = () => createUnit(ctx, units.length);
+    const statusOf = (unit) =>
+      unitStatus({ unit, device: unit.device_id ? devicesById.get(unit.device_id) : null, latest: unit.latest, activeAlerts: unit.active_alerts || 0, criticalAlerts: unit.critical_alerts || 0 });
+    const sorted = [...units].sort((a, b) => statusOf(a).rank - statusOf(b).rank);
 
     clear(
       root,
       units.length
-        ? h("div", { class: "grid grid-3" }, units.map((unit) => unitCard(unit, unit.device_id ? devicesById.get(unit.device_id) : null)))
+        ? h("div", { class: "grid grid-3" }, sorted.map((unit) => unitCard(unit, unit.device_id ? devicesById.get(unit.device_id) : null)))
         : h("section", { class: "card" }, emptyState("warehouse", "Nenhuma estufa", "Cadastre a estufa e vincule o sensor dela.", [button("Nova estufa", { variant: "btn-primary", iconName: "add", onClick: add })])),
       units.length ? h("div", {}, button("Nova estufa", { variant: "btn-outline", iconName: "add", onClick: add })) : null,
       loose.length
@@ -78,7 +83,7 @@ export function renderUnits(ctx) {
                   "div",
                   { class: "list-row" },
                   icon("sensors"),
-                  h("div", { class: "list-row-body" }, h("strong", { class: "num" }, device.device_code), h("span", { class: "small muted" }, device.status === "online" ? "Online" : `Último contato ${f.relative(device.last_seen_at)}`)),
+                  h("div", { class: "list-row-body" }, h("strong", { class: "num" }, device.device_code), h("span", { class: "small muted" }, device.status === "online" ? "Respondendo" : `Último contato ${f.relative(device.last_seen_at)}`)),
                   button("", { variant: "btn-ghost btn-icon btn-icon-danger", iconName: "linkOff", "aria-label": `Desvincular ${device.device_code}`, onClick: () => unlink(device) }),
                 ),
               ),

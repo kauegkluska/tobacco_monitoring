@@ -24,6 +24,49 @@ _StatusColors _statusColors(BuildContext context, StatusKind kind) {
   };
 }
 
+/// Frase de decisão do topo da estufa: o que está acontecendo e o que fazer.
+class DecisionCard extends StatelessWidget {
+  const DecisionCard({required this.kind, required this.icon, required this.title, this.text, this.action, this.onHelp, super.key});
+
+  final StatusKind kind;
+  final IconData icon;
+  final String title;
+  final String? text;
+  final Widget? action;
+  final VoidCallback? onHelp;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = _statusColors(context, kind);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
+      decoration: BoxDecoration(color: colors.background, borderRadius: BorderRadius.circular(16)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 26, color: colors.foreground),
+              const SizedBox(width: 10),
+              Expanded(child: Text(title, style: TextStyle(color: colors.foreground, fontSize: 21, fontWeight: FontWeight.w800))),
+              if (onHelp != null)
+                IconButton(onPressed: onHelp, tooltip: 'O que significa', visualDensity: VisualDensity.compact, icon: Icon(Icons.help_outline, size: 20, color: colors.foreground)),
+            ],
+          ),
+          if (text != null) ...[
+            const SizedBox(height: 6),
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Text(text!, style: TextStyle(color: colors.foreground, fontSize: 15.5, height: 1.3)),
+            ),
+          ],
+          if (action != null) ...[const SizedBox(height: 10), action!],
+        ],
+      ),
+    );
+  }
+}
+
 /// Selo de estado: sempre ícone (ou ponto) + texto, nunca só cor.
 class StatusBadge extends StatelessWidget {
   const StatusBadge({required this.kind, required this.label, this.icon, super.key});

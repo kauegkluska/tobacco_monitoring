@@ -15,21 +15,24 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
-/// Endereço padrão: o emulador Android enxerga o computador em 10.0.2.2.
+/// Servidor na internet usado pelo app instalado no celular do produtor.
+const productionBaseUrl = 'http://137.131.176.80:8000';
+
+/// Endereço padrão. Em desenvolvimento, o emulador Android enxerga o computador em 10.0.2.2.
 String defaultBaseUrl() {
   if (kIsWeb) {
     final base = Uri.base;
     if (base.scheme.startsWith('http') && base.port == 8000) return base.origin;
     return 'http://${base.host.isEmpty ? '127.0.0.1' : base.host}:8000';
   }
-  if (defaultTargetPlatform == TargetPlatform.android) return 'http://10.0.2.2:8000';
+  if (defaultTargetPlatform == TargetPlatform.android) return kReleaseMode ? productionBaseUrl : 'http://10.0.2.2:8000';
   return 'http://127.0.0.1:8000';
 }
 
 String _normalize(String url) => url.trim().replaceAll(RegExp(r'/+$'), '');
 
 const _fieldNames = {
-  'login': 'Login',
+  'login': 'Usuário',
   'password': 'Senha',
   'new_password': 'Nova senha',
   'current_password': 'Senha atual',
@@ -162,7 +165,7 @@ class ApiClient {
     }();
   }
 
-  Future<dynamic> _send(String method, String path, {Object? body, bool auth = true, bool retry = true}) async {
+  Future<dynamic> _send(String method, String path, {Object? body, bool auth = true, bool retry = true, bool retryConnection = true}) async {
     final headers = <String, String>{'Accept': 'application/json'};
     if (body != null) headers['Content-Type'] = 'application/json';
     if (auth && _accessToken != null) headers['Authorization'] = 'Bearer $_accessToken';
@@ -175,15 +178,17 @@ class ApiClient {
       response = await http.Response.fromStream(await _client.send(request).timeout(_timeout));
     } on TimeoutException {
       online.value = false;
-      throw ApiException('O servidor demorou para responder ($baseUrl). Verifique a rede.');
+      throw ApiException('O monitor demorou para responder. Confira a internet do celular.');
     } catch (_) {
+      // Uma conexão reaproveitada pode ter sido fechada pelo servidor: consultas podem tentar de novo sem risco.
+      if (method == 'GET' && retryConnection) return _send(method, path, auth: auth, retry: retry, retryConnection: false);
       online.value = false;
-      throw ApiException('Não foi possível conectar ao servidor ($baseUrl). Verifique se o backend está ligado e se o celular está na mesma rede.');
+      throw ApiException('Não consegui falar com o monitor. Confira a internet do celular.');
     }
     online.value = true;
 
     if (response.statusCode == 401 && auth && retry) {
-      if (await _refresh()) return _send(method, path, body: body, auth: auth, retry: false);
+      if (await _refresh()) return _send(method, path, body: body, auth: auth, retry: false, retryConnection: retryConnection);
       await _saveTokens(null);
       onSessionExpired?.call();
       throw ApiException('Sua sessão expirou. Entre novamente.', 401);
@@ -200,14 +205,14 @@ class ApiClient {
       }
       final message = describeValidation(detail) ??
           (detail is String ? detail : null) ??
-          (response.statusCode >= 500 ? 'O servidor encontrou um erro. Tente novamente em instantes.' : 'Erro ${response.statusCode} ao falar com o servidor.');
+          (response.statusCode >= 500 ? 'O monitor encontrou um erro. Tente novamente em instantes.' : 'Erro ${response.statusCode} ao falar com o monitor.');
       throw ApiException(message, response.statusCode);
     }
     if (text.isEmpty) return null;
     try {
       return jsonDecode(text);
     } on FormatException {
-      throw ApiException('Resposta inesperada do servidor ($baseUrl). Confira se o endereço é o da API.', response.statusCode);
+      throw ApiException('Resposta inesperada do monitor.', response.statusCode);
     }
   }
 

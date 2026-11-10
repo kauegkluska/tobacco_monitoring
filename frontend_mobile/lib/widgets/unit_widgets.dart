@@ -4,37 +4,9 @@ import '../core/format.dart' as f;
 import '../core/models.dart';
 import '../core/prefs.dart';
 import '../core/theme.dart';
-import 'common.dart';
 
 /// Leituras mais antigas que isso aparecem apagadas.
 const staleAfter = Duration(minutes: 5);
-
-typedef UnitStatus = ({StatusKind kind, String label, IconData? icon});
-
-/// Situação da estufa em uma palavra, da mais urgente para a mais tranquila.
-UnitStatus unitStatus({
-  required CuringUnit unit,
-  required Device? device,
-  required Reading? latest,
-  required int activeAlerts,
-  required int criticalAlerts,
-}) {
-  if (device == null) return (kind: StatusKind.neutral, label: 'Sem sensor', icon: Icons.link_off);
-  if (!unit.isDrying) {
-    return unit.isFinished
-        ? (kind: StatusKind.ok, label: 'Finalizada', icon: Icons.check_circle)
-        : (kind: StatusKind.neutral, label: 'Parada', icon: Icons.pause);
-  }
-  if (criticalAlerts > 0) return (kind: StatusKind.crit, label: 'Crítico', icon: Icons.error);
-  if (!device.online) return (kind: StatusKind.offline, label: 'Sem sinal', icon: Icons.cloud_off);
-  if (activeAlerts > 0) return (kind: StatusKind.warn, label: 'Atenção', icon: Icons.warning_amber_rounded);
-  final limits = unit.limitsWith(device);
-  if (latest == null) return (kind: StatusKind.neutral, label: 'Aguardando', icon: Icons.schedule);
-  final outside = rangeState(latest.temperature, limits.tempMin, limits.tempMax) != 'ok' ||
-      rangeState(latest.humidity, limits.humidityMin, limits.humidityMax) != 'ok';
-  if (outside) return (kind: StatusKind.warn, label: 'Fora da faixa', icon: Icons.swap_vert);
-  return (kind: StatusKind.ok, label: 'Normal', icon: Icons.check);
-}
 
 /// Leitura antiga, sem sinal ou gravada fora da secagem atual.
 bool isStale(Reading? reading, CuringUnit unit, Device? device) {
