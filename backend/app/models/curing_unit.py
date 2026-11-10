@@ -32,7 +32,7 @@ class CuringUnit(Base):
     # Nome dado pelo usuário e regra do modo automático.
     humidity_output_name = Column(String(40), nullable=False, default="Flap")
     temperature_output_name = Column(String(40), nullable=False, default="Ventoinha")
-    humidity_output_trigger = Column(String(20), nullable=False, default="humidity_out")
+    humidity_output_trigger = Column(String(20), nullable=False, default="humidity_high")
     temperature_output_trigger = Column(String(20), nullable=False, default="temperature_target")
     # Temperatura alvo em °C, definida pelo produtor: na regra "temperature_target" a saída liga abaixo dela.
     target_temperature = Column(Float, nullable=True)

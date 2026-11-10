@@ -45,3 +45,12 @@ def test_legacy_database_is_migrated(tmp_path):
             "FROM curing_units"
         )).fetchone()
         assert tuple(outputs) == ("Flap", "Ventoinha", "temperature_target", None)
+        # O flap deixa de ligar com umidade baixa.
+        assert connection.execute(text("SELECT humidity_output_trigger FROM curing_units")).scalar() == "humidity_high"
+
+    # A correção roda uma vez só: a escolha feita depois pelo produtor continua valendo.
+    with engine.begin() as connection:
+        connection.execute(text("UPDATE curing_units SET humidity_output_trigger = 'humidity_out'"))
+    initialize_database(engine)
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT humidity_output_trigger FROM curing_units")).scalar() == "humidity_out"

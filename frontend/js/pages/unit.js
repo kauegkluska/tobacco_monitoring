@@ -563,7 +563,7 @@ export function renderUnit(ctx) {
           label: "Alvo",
           input,
           suffix: f.tempUnit(),
-          hint: phase ? `Esperado na fase: ${f.tempRange(phase.temp_min, phase.temp_max)}` : "A ventoinha liga abaixo do alvo e desliga ao atingi-lo.",
+          hint: phase ? `Esperado na fase: ${f.tempRange(phase.temp_min, phase.temp_max)}` : "A ventoinha liga abaixo da faixa do alvo e desliga acima dela.",
         }),
       ),
       actions: [

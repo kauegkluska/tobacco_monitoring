@@ -84,7 +84,8 @@ flowchart LR
 ### Controle das saídas (relés)
 - Dois relés no sender: **Flap** (relé 1, GPIO2) e **Ventoinha** (relé 2, GPIO3), com nome editável.
 - Modos **Automático**, **Ligada** e **Desligada**.
-- **Temperatura alvo**: o produtor define o alvo (em °F) e, no automático, a ventoinha liga abaixo dele e desliga ao atingi-lo (margem de 0,9 °F para o relé não ficar batendo). Sem alvo definido, a ventoinha fica desligada.
+- **Temperatura alvo**: o produtor define o alvo (em °F) e, no automático, a ventoinha opera em uma faixa de ±2 °F em torno dele: liga abaixo da faixa, desliga acima dela e, dentro dela, mantém o estado, para o relé não ficar batendo. Sem alvo definido, a ventoinha fica desligada.
+- **Flap**: no automático, liga só com a umidade acima do máximo da fase. Com umidade baixa fica desligado, para não secar ainda mais a estufa.
 - Outras regras do automático à escolha: temperatura ou umidade fora da faixa, acima do máximo ou abaixo do mínimo.
 - **Confirmação do sender**: o app mostra quando o relé realmente mudou de estado.
 - Aviso sonoro de 2 s no gateway sempre que uma saída liga, repetido no celular (som e vibração).

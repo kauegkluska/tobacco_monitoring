@@ -234,6 +234,15 @@ def initialize_database(target_engine=None) -> None:
         add_column("curing_units", "drop_reference", "FLOAT")
         add_column("curing_units", "wet_bulb_gate_open", "BOOLEAN NOT NULL DEFAULT 1")
 
+        # Uma vez só: o flap ligava também com umidade baixa, o que secava ainda mais a estufa.
+        # Saídas renomeadas ficam como estão, e quem escolher a regra antiga depois não é revertido.
+        if connection.execute(text("PRAGMA user_version")).scalar() < 1:
+            connection.execute(text(
+                "UPDATE curing_units SET humidity_output_trigger = 'humidity_high' "
+                "WHERE humidity_output_trigger = 'humidity_out' AND humidity_output_name = 'Flap'"
+            ))
+            connection.execute(text("PRAGMA user_version = 1"))
+
         # A cura passou a ter quatro fases (Amarelação, Murchamento, Secagem da folha e do talo).
         for old, new in (("Início da secagem", "Amarelação"), ("Amarelecimento", "Amarelação"), ("Murcha", "Murchamento")):
             connection.execute(

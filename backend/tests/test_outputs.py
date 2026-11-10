@@ -104,7 +104,7 @@ def test_output_events_feed_is_private_and_incremental(client, auth, drying_unit
     assert len(first) == 1 and first[0]["curing_unit_name"] == "Estufa 01"
 
     assert client.get(f"/output-events/?after_id={first[0]['id']}", headers=auth).json() == []
-    send_reading(client, 35.0, 97.0)
+    send_reading(client, 34.0, 97.0)
     newer = client.get(f"/output-events/?after_id={first[0]['id']}&buzzer=true", headers=auth).json()
     assert [(e["output"], e["buzzer"]) for e in newer] == [("temperature", True)]
 
@@ -169,6 +169,16 @@ def test_sender_confirms_the_relay_state(client, auth, drying_unit):
     assert outputs["humidity"]["in_sync"] is False  # aguardando o sender aplicar
 
 
+def test_flap_only_opens_with_high_humidity(client, auth, drying_unit):
+    # Amarelação: 80–95%. Abrir o flap com a umidade baixa secaria ainda mais a estufa.
+    outputs = client.get(f"/curing_units/{drying_unit['unit']['id']}/outputs", headers=auth).json()
+    assert outputs["humidity"]["trigger"] == "humidity_high"
+    assert outputs["humidity"]["reason"] == "Liga quando a umidade passar do máximo."
+    assert commands(send_reading(client, 38.0, 60.0)) == (False, False)
+    assert commands(send_reading(client, 38.0, 97.0)) == (True, False)
+    assert commands(send_reading(client, 38.0, 60.0)) == (False, False)
+
+
 def test_fan_keeps_the_target_temperature(client, auth, drying_unit):
     unit_id = drying_unit["unit"]["id"]
     url = f"/curing_units/{unit_id}/outputs"
@@ -184,11 +194,20 @@ def test_fan_keeps_the_target_temperature(client, auth, drying_unit):
     assert changed["target_temperature"] == 38
     # A última leitura (30 °C) já está abaixo do alvo: liga sem esperar a próxima.
     assert changed["temperature"]["on"] is True
-    assert changed["temperature"]["reason"] == "Ligada porque a temperatura está abaixo do alvo."
-    assert commands(send_reading(client, 37.9, 85.0)) == (False, True)  # segue até atingir o alvo
-    assert commands(send_reading(client, 38.0, 85.0)) == (False, False)  # atingiu: desliga
-    assert commands(send_reading(client, 37.7, 85.0)) == (False, False)  # dentro da margem de 0,5 °C
-    assert commands(send_reading(client, 37.4, 85.0)) == (False, True)
+    assert changed["temperature"]["reason"] == "Ligada porque a temperatura ficou abaixo da faixa do alvo."
+    # Faixa de ±2 °F em torno de 38 °C: de 36,89 °C a 39,11 °C.
+    assert commands(send_reading(client, 38.0, 85.0)) == (False, True)  # no alvo: segue ligada
+    assert commands(send_reading(client, 39.0, 85.0)) == (False, True)  # ainda dentro da faixa
+    assert commands(send_reading(client, 39.2, 85.0)) == (False, False)  # passou da faixa: desliga
+    assert commands(send_reading(client, 38.0, 85.0)) == (False, False)  # no alvo: segue desligada
+    assert commands(send_reading(client, 37.0, 85.0)) == (False, False)  # ainda dentro da faixa
+    assert commands(send_reading(client, 36.8, 85.0)) == (False, True)  # abaixo da faixa: liga
+
+    # Oscilação dentro da faixa não gera nenhum acionamento novo.
+    before = client.get(url, headers=auth).json()["events"][0]["id"]
+    for value in (37.2, 38.5, 37.0, 39.0, 36.95, 38.0):
+        assert commands(send_reading(client, value, 85.0)) == (False, True)
+    assert client.get(url, headers=auth).json()["events"][0]["id"] == before
 
     assert client.get(f"/curing_units/{unit_id}", headers=auth).json()["target_temperature"] == 38
     assert client.patch(url, json={"target_temperature": 95}, headers=auth).status_code == 422

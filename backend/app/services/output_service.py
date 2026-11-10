@@ -12,6 +12,8 @@ from services.phases import limits_for
 # Margem para o relé não ficar batendo; independente das margens dos alertas.
 TEMPERATURE_HYSTERESIS_C = 0.5
 HUMIDITY_HYSTERESIS = 1.0
+# Metade da faixa da ventoinha em torno da temperatura alvo: ±2 °F.
+FAN_TARGET_BAND_C = 2 / 1.8
 
 OUTPUT_MODES = ("auto", "on", "off")
 # "humidity" é o relé 1 do sender (GPIO2) e "temperature" o relé 2 (GPIO3).
@@ -28,12 +30,13 @@ TRIGGERS = {
     "temperature_low": (
         "temperature", "low", "a temperatura ficar abaixo do mínimo", "a temperatura ficou abaixo do mínimo",
     ),
-    # Ventoinha: liga abaixo da temperatura alvo definida pelo produtor e desliga ao atingi-la.
+    # Ventoinha: opera na faixa em torno da temperatura alvo definida pelo produtor.
     "temperature_target": (
-        "temperature", "target", "a temperatura ficar abaixo do alvo", "a temperatura está abaixo do alvo",
+        "temperature", "target", "a temperatura ficar abaixo da faixa do alvo", "a temperatura ficou abaixo da faixa do alvo",
     ),
 }
-DEFAULT_TRIGGERS = {"humidity": "humidity_out", "temperature": "temperature_target"}
+# Abrir o flap tira umidade: ele só liga com a umidade acima do máximo.
+DEFAULT_TRIGGERS = {"humidity": "humidity_high", "temperature": "temperature_target"}
 DEFAULT_NAMES = {"humidity": "Flap", "temperature": "Ventoinha"}
 
 
@@ -53,14 +56,15 @@ def name_of(unit: CuringUnit, output: str) -> str:
 def _auto_state(current: bool, value: float | None, low: float, high: float, margin: float, direction: str) -> bool:
     """Liga ao violar o limite e só desliga com folga dentro da faixa, para o relé não ficar batendo.
 
-    Na regra "target", `low` é a temperatura alvo: liga abaixo de alvo − margem e desliga ao atingir o alvo.
+    Na regra "target", `low` e `high` são as bordas da faixa do alvo: liga abaixo dela, desliga acima dela
+    e, dentro dela, mantém o estado atual. A margem não se aplica.
     """
     if value is None:
         return current
     if direction == "target":
-        if value < low - margin:
+        if value < low:
             return True
-        return False if value >= low else current
+        return False if value > high else current
     too_high = value > high
     too_low = value < low
     if direction == "high":
@@ -107,7 +111,7 @@ def update_outputs(
             # Sem temperatura alvo definida, a ventoinha fica desligada.
             target = unit.target_temperature
             new_state = False if target is None else _auto_state(
-                current, value, target, target, TEMPERATURE_HYSTERESIS_C, direction,
+                current, value, target - FAN_TARGET_BAND_C, target + FAN_TARGET_BAND_C, 0.0, direction,
             )
             cause = "auto"
         else:

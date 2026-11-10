@@ -166,7 +166,7 @@ class _VentilationPageState extends State<VentilationPage> {
                 labelText: 'Alvo',
                 suffixText: symbol,
                 helperText: phase == null
-                    ? 'A ventoinha liga abaixo do alvo e desliga ao atingi-lo.'
+                    ? 'A ventoinha liga abaixo da faixa do alvo e desliga acima dela.'
                     : 'Esperado na fase: ${f.tempRange(phase.limits.tempMin, phase.limits.tempMax, unitPref)}',
               ),
             ),
