@@ -110,3 +110,21 @@ def test_real_level_change_is_accepted_after_consistent_samples(client, auth):
         assert all(reading.is_outlier is False for reading in readings)
         # Cinco amostras de cada nível na janela de 30 s.
         assert readings[-1].filtered_temperature == 42.0
+
+
+def test_samples_on_the_way_to_a_new_level_are_not_jumps(client, auth):
+    unit_id = make_unit(client, auth)
+    with SessionLocal() as db:
+        before = [(s, 40.0, 80.0) for s in range(0, 10, 2)]
+        after = [(10, 42.5, 80.0)] + [(s, 45.0, 80.0) for s in range(12, 20, 2)]
+        readings = _feed(db, unit_id, before + after)
+        assert all(reading.is_outlier is False for reading in readings)
+
+
+def test_a_jump_that_comes_back_stays_discarded_after_a_level_change(client, auth):
+    unit_id = make_unit(client, auth)
+    with SessionLocal() as db:
+        before = [(s, 40.0, 80.0) for s in range(0, 10, 2)]
+        after = [(10, 55.0, 80.0)] + [(s, 44.0, 80.0) for s in range(12, 30, 2)]
+        readings = _feed(db, unit_id, before + after)
+        assert [reading.temperature for reading in readings if reading.is_outlier] == [55.0]

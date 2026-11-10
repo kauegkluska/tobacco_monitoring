@@ -484,7 +484,10 @@ def _heating_message(unit: CuringUnit, now: datetime) -> str:
 
 
 def _jump_runs(db: Session, unit: CuringUnit, now: datetime) -> int:
-    """Quantos saltos distintos houve na janela; amostras seguidas descartadas contam como um só."""
+    """Quantos saltos distintos voltaram ao nível anterior na janela; amostras seguidas descartadas contam como um só.
+
+    O salto em aberto não conta: ele ainda pode ser o começo de uma mudança real de nível, que é aceita depois.
+    """
     flags = (
         db.query(Reading.is_outlier)
         .filter(
@@ -497,7 +500,7 @@ def _jump_runs(db: Session, unit: CuringUnit, now: datetime) -> int:
     )
     runs, previous = 0, False
     for (flag,) in flags:
-        runs += 1 if flag and not previous else 0
+        runs += 1 if previous and not flag else 0
         previous = flag
     return runs
 
@@ -537,7 +540,8 @@ def _evaluate_sensor(db: Session, unit: CuringUnit, reading: Reading, samples: l
         and h_min == h_max
         and first <= start + timedelta(minutes=1)
     )
-    jumping = bool(reading.is_outlier) and _jump_runs(db, unit, now) >= SENSOR_JUMP_COUNT
+    # Avaliado na leitura válida que fecha o salto: só então se sabe que ele não era mudança de nível.
+    jumping = not reading.is_outlier and _jump_runs(db, unit, now) >= SENSOR_JUMP_COUNT
     saturated = persisted(samples, now, SATURATED_MINUTES, lambda s: s.humidity >= SATURATED_HUMIDITY)
     active = _active(db, unit, SENSOR_TYPE)
 

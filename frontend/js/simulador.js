@@ -28,7 +28,8 @@ const DEFAULTS = {
   follow_app: true,
   r1: false,
   r2: false,
-  jitter: false,
+  // Um SHT40 de verdade sempre varia um pouco; valores idênticos por 10 min abrem "O sensor parou de variar".
+  jitter: true,
   jitter_t: 0.5,
   jitter_h: 1,
   api_base: defaultApiBase(),
@@ -260,14 +261,15 @@ function describeResult(status, json) {
 
 /* ---------- Ciclo de envio ---------- */
 
+// Varia só o valor enviado, em torno do que está digitado. Não escreve nos campos: se escrevesse, um clique no − ou
+// no + durante o envio seria desfeito quando a resposta chegasse, e a leitura enviada ficaria pulando.
 function applyJitter(v) {
-  if (!v.jitter) return;
+  if (!v.jitter || !Number.isFinite(v.temperature_f) || !Number.isFinite(v.humidity)) return;
   const drift = (amplitude) => (Math.random() * 2 - 1) * (Number.isFinite(amplitude) ? amplitude : 0);
   // Faixa do SHT40 (−40 a 125 °C) em °F.
-  const temperatureF = Math.min(257, Math.max(-40, v.temperature_f + drift(v.jitter_t)));
-  const humidity = Math.min(100, Math.max(0, v.humidity + drift(v.jitter_h)));
-  field("temperature_f").value = temperatureF.toFixed(1);
-  field("humidity").value = humidity.toFixed(2);
+  v.temperature_f = Number(Math.min(257, Math.max(-40, v.temperature_f + drift(v.jitter_t))).toFixed(2));
+  v.temperature = fahrenheitToCelsius(v.temperature_f);
+  v.humidity = Number(Math.min(100, Math.max(0, v.humidity + drift(v.jitter_h))).toFixed(2));
 }
 
 async function sendOnce() {
@@ -275,6 +277,7 @@ async function sendOnce() {
   if (!forms.every((form) => form.reportValidity())) return false;
 
   const v = readValues();
+  applyJitter(v);
   const problem = receiverRejects(v);
   const sentAt = new Date();
   const relays = v.include_relays ? `${v.r1 ? 1 : 0} / ${v.r2 ? 1 : 0}` : "não enviados";
@@ -346,7 +349,6 @@ async function sendOnce() {
     command: success ? `H=${cache.rele_umidade ? 1 : 0} T=${cache.rele_temperatura ? 1 : 0}` : "—",
   });
 
-  applyJitter(v);
   sending = false;
   save();
   render();

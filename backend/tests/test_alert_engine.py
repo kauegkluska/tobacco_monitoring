@@ -315,6 +315,9 @@ def test_repeated_jumps_open_the_fault_and_ten_normal_minutes_close_it(unit_id):
     for _ in range(3):
         sim.run(20 / 60, 50, 35, step=2)
         sim.run(2 / 60, 70, 35, step=2, noise=False)
+    # O terceiro salto só conta quando a leitura volta ao nível anterior.
+    assert SENSOR_TYPE not in sim.active()
+    sim.run(2 / 60, 50, 35, step=2)
     assert "pulando" in sim.active()[SENSOR_TYPE].message
     sim.run(9, 50, 35, step=5)
     assert SENSOR_TYPE in sim.active()
@@ -327,6 +330,19 @@ def test_a_real_level_change_is_not_a_sensor_fault(unit_id):
     sim.run(1, 50, 35, step=2)
     sim.run(1, 53, 35, step=2)
     assert SENSOR_TYPE not in sim.active()
+
+
+def test_several_quick_level_changes_are_not_a_sensor_fault(unit_id):
+    """Ajustes seguidos (como no simulador), cada um com uma amostra no meio do caminho."""
+    sim = after_grace(unit_id, "Secagem da folha", 50, 35)
+    level = 50.0
+    for _ in range(4):
+        sim.run(2 / 60, level + 2.5, 35, step=2, noise=False)
+        level += 5
+        sim.run(40 / 60, level, 35, step=2)
+    assert SENSOR_TYPE not in sim.active()
+    with SessionLocal() as db:
+        assert db.query(Reading).filter(Reading.curing_unit_id == unit_id, Reading.is_outlier.is_(True)).count() == 0
 
 
 # 11. Lacuna de comunicação

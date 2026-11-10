@@ -51,6 +51,17 @@ def _is_jump(a: Reading, b: Reading) -> bool:
     return abs(a.temperature - b.temperature) > JUMP_TEMPERATURE_C or abs(a.humidity - b.humidity) > JUMP_HUMIDITY
 
 
+def _coherent(item: Reading, reading: Reading, last: Reading) -> bool:
+    """A amostra está no nível da leitura nova ou no caminho entre o nível anterior e ela (subida ou descida rápida)."""
+
+    def fits(value: float, target: float, previous: float, limit: float) -> bool:
+        return abs(value - target) <= limit or min(previous, target) <= value <= max(previous, target)
+
+    return fits(item.temperature, reading.temperature, last.temperature, JUMP_TEMPERATURE_C) and fits(
+        item.humidity, reading.humidity, last.humidity, JUMP_HUMIDITY,
+    )
+
+
 def _set_filtered(reading: Reading, temperature: float, humidity: float) -> None:
     reading.filtered_temperature = temperature
     reading.filtered_humidity = humidity
@@ -58,7 +69,11 @@ def _set_filtered(reading: Reading, temperature: float, humidity: float) -> None
 
 
 def prepare_reading(db: Session, reading: Reading) -> None:
-    """Marca a leitura como salto ou grava os valores filtrados. A leitura já precisa estar no banco."""
+    """Marca a leitura como salto ou grava os valores filtrados. A leitura já precisa estar no banco.
+
+    Salto é a amostra longe da última válida, tomada logo depois dela. Se as amostras seguintes confirmam o novo
+    nível, ele era real: as amostras pendentes que levam a ele deixam de ser salto. Só fica como salto o que voltou.
+    """
     unit_filter = (Reading.curing_unit_id == reading.curing_unit_id, Reading.id != reading.id)
     last = (
         db.query(Reading)
@@ -66,20 +81,28 @@ def prepare_reading(db: Session, reading: Reading) -> None:
         .order_by(Reading.timestamp.desc(), Reading.id.desc())
         .first()
     )
-    if last is not None and reading.timestamp - last.timestamp <= JUMP_MAX_GAP and _is_jump(last, reading):
-        pending = (
-            db.query(Reading)
-            .filter(*unit_filter, Reading.is_outlier.is_(True), Reading.timestamp > last.timestamp)
-            .all()
+    pending = [] if last is None else (
+        db.query(Reading)
+        .filter(
+            *unit_filter,
+            Reading.is_outlier.is_(True),
+            Reading.timestamp > last.timestamp,
+            Reading.timestamp <= reading.timestamp,
         )
-        if len(pending) + 1 < JUMP_CONFIRM_SAMPLES or any(_is_jump(item, reading) for item in pending):
+        .all()
+    )
+    if last is not None and reading.timestamp - last.timestamp <= JUMP_MAX_GAP and _is_jump(last, reading):
+        confirmed = len(pending) + 1 >= JUMP_CONFIRM_SAMPLES and all(_coherent(item, reading, last) for item in pending)
+        if not confirmed:
             reading.is_outlier = True
             db.flush()
             return
-        for item in pending:
+    # A leitura foi aceita: as pendentes coerentes com ela eram a mudança de nível, não salto.
+    for item in pending:
+        if _coherent(item, reading, last):
             item.is_outlier = False
             _set_filtered(item, item.temperature, item.humidity)
-        db.flush()
+    db.flush()
 
     rows = (
         db.query(Reading.temperature, Reading.humidity)
