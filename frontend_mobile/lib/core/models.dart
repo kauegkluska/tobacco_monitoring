@@ -108,6 +108,7 @@ class CuringUnit {
         targetTemperature = _double(json['target_temperature']),
         stageHours = _double(json['stage_hours']),
         cycleHours = _double(json['cycle_hours']),
+        cycleStartedAt = _date(json['cycle_started_at']),
         interrupted = json['interrupted'] == true,
         pausedAt = _date(json['paused_at']);
 
@@ -134,6 +135,9 @@ class CuringUnit {
   /// Horas com a secagem ligada, sem o tempo parado: na fase atual e na estufada.
   final double? stageHours;
   final double? cycleHours;
+
+  /// Início da estufada atual (ou da última, com a secagem parada); nulo se nunca houve estufada.
+  final DateTime? cycleStartedAt;
 
   /// Secagem parada no meio de uma fase: ao ligar, o produtor escolhe continuar ou começar outra estufada.
   final bool interrupted;

@@ -14,23 +14,28 @@ class _Period {
   const _Period(this.label, this.hours);
 
   final String label;
-  final int hours;
+
+  /// Nulo: a estufada inteira.
+  final int? hours;
 }
 
+// O gráfico é da estufada (a carga atual, ou a última), não da estufa.
 const _periods = [
-  _Period('6 h', 6),
-  _Period('24 h', 24),
-  _Period('7 dias', 24 * 7),
-  _Period('30 dias', 24 * 30),
+  _Period('Estufada toda', null),
+  _Period('Últimas 24 h', 24),
+  _Period('Últimas 6 h', 6),
 ];
 
-/// Gráfico completo da estufa, aberto a partir do resumo de 24 h.
+/// Gráfico completo da estufada, aberto a partir do resumo na tela da estufa.
 class UnitChartPage extends StatefulWidget {
-  const UnitChartPage({required this.unitId, required this.limits, required this.isDrying, super.key});
+  const UnitChartPage({required this.unitId, required this.limits, required this.isDrying, this.batchStartedAt, super.key});
 
   final int unitId;
   final Limits limits;
   final bool isDrying;
+
+  /// Início da estufada mostrada; nulo se a estufa nunca teve estufada.
+  final DateTime? batchStartedAt;
 
   @override
   State<UnitChartPage> createState() => _UnitChartPageState();
@@ -40,7 +45,7 @@ class _UnitChartPageState extends State<UnitChartPage> {
   Series? series;
   bool loading = false;
   String? error;
-  _Period period = _periods[1];
+  _Period period = _periods.first;
   bool temperature = true;
 
   ApiClient get api => AppScope.of(context).api;
@@ -54,13 +59,9 @@ class _UnitChartPageState extends State<UnitChartPage> {
 
   Future<void> _load() async {
     setState(() => loading = true);
-    final until = DateTime.now().toUtc();
-    final since = until.subtract(Duration(hours: period.hours));
+    final hours = period.hours == null ? '' : '&hours=${period.hours}';
     try {
-      final result = await api.get(
-        '/curing_units/${widget.unitId}/series?since=${Uri.encodeQueryComponent(since.toIso8601String())}'
-        '&until=${Uri.encodeQueryComponent(until.toIso8601String())}&points=180',
-      );
+      final result = await api.get('/curing_units/${widget.unitId}/series?batch=true&points=180$hours');
       if (!mounted) return;
       setState(() {
         series = Series.fromJson(result as Map<String, dynamic>);
@@ -76,7 +77,7 @@ class _UnitChartPageState extends State<UnitChartPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Gráfico')),
+      appBar: AppBar(title: const Text('Gráfico da estufada')),
       body: error != null && series == null
           ? ErrorView(title: 'Não foi possível carregar o gráfico', message: error!, onRetry: _load)
           : ListenableBuilder(listenable: prefs, builder: (context, _) => _body()),
@@ -117,6 +118,14 @@ class _UnitChartPageState extends State<UnitChartPage> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
       children: [
+        if (widget.batchStartedAt != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Text(
+              '${widget.isDrying ? 'Estufada em andamento' : 'Última estufada'}, iniciada em ${f.dateTime(widget.batchStartedAt)}.',
+              style: TextStyle(fontSize: 13.5, color: context.colors.textSecondary),
+            ),
+          ),
         SegmentedButton<bool>(
           segments: const [
             ButtonSegment(value: true, label: Text('Temperatura'), icon: Icon(Icons.thermostat)),
@@ -166,8 +175,12 @@ class _UnitChartPageState extends State<UnitChartPage> {
                   detail: (point) => point.count > 1 ? '${format(point.low!)} a ${format(point.high!)}' : '1 leitura',
                   gap: Duration(seconds: (data.bucketSeconds * 3).clamp(300, 1 << 30)),
                   height: 260,
-                  semanticLabel: '${temperature ? 'Temperatura' : 'Umidade'} nas últimas ${period.label}',
-                  emptyText: widget.isDrying ? 'Sem leituras neste período.' : 'Sem leituras. Elas só são gravadas com a secagem ligada.',
+                  semanticLabel: '${temperature ? 'Temperatura' : 'Umidade'} da estufada${period.hours == null ? '' : ', últimas ${period.hours} horas'}',
+                  emptyText: widget.batchStartedAt == null
+                      ? 'Nenhuma estufada ainda. O gráfico começa quando a secagem for iniciada.'
+                      : widget.isDrying
+                          ? 'Sem leituras neste período da estufada.'
+                          : 'Sem leituras nesta estufada. Elas só são gravadas com a secagem ligada.',
                 ),
         ),
         if (phases.length > 1) PhaseLegend(phases: phases),

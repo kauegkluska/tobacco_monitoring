@@ -1312,6 +1312,29 @@ textarea {
   color: var(--crit);
 }
 
+.menu-item:disabled,
+.menu-item:disabled .icon {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.menu-item:disabled:hover {
+  background: none;
+}
+
+.menu-item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 0;
+}
+
+.menu-item-hint {
+  max-width: 240px;
+  font-size: 0.8125rem;
+  line-height: 1.3;
+}
+
 .paused-note {
   margin-bottom: 12px;
   font-weight: 600;

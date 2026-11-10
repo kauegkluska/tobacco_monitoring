@@ -120,14 +120,10 @@ class _UnitPageState extends State<UnitPage> {
     }
   }
 
+  /// Resumo do gráfico: a estufada atual (ou a última) inteira.
   Future<void> _loadSeries() async {
-    final until = DateTime.now().toUtc();
-    final since = until.subtract(const Duration(hours: 24));
     try {
-      final result = await api.get(
-        '$_base/series?since=${Uri.encodeQueryComponent(since.toIso8601String())}'
-        '&until=${Uri.encodeQueryComponent(until.toIso8601String())}&points=60',
-      );
+      final result = await api.get('$_base/series?batch=true&points=60');
       if (!mounted) return;
       setState(() {
         series = Series.fromJson(result as Map<String, dynamic>);
@@ -260,6 +256,27 @@ class _UnitPageState extends State<UnitPage> {
     }
   }
 
+  PopupMenuItem<_MenuAction> _deleteItem(CuringUnit current) {
+    final blocker = current.isDrying
+        ? 'Pare a secagem antes.'
+        : latest != null
+            ? 'Tem leituras salvas: o histórico das estufadas fica guardado.'
+            : null;
+    if (blocker == null) return const PopupMenuItem(value: _MenuAction.delete, child: Text('Excluir estufa'));
+    return PopupMenuItem(
+      enabled: false,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('Excluir estufa'),
+          const SizedBox(height: 2),
+          Text(blocker, style: TextStyle(fontSize: 12.5, color: context.colors.muted)),
+        ],
+      ),
+    );
+  }
+
   Future<void> _delete(CuringUnit current) async {
     final confirmed = await confirmAction(
       context,
@@ -309,8 +326,8 @@ class _UnitPageState extends State<UnitPage> {
                 const PopupMenuItem(value: _MenuAction.rename, child: Text('Renomear')),
                 if (widget.onCreateUnit != null) const PopupMenuItem(value: _MenuAction.newUnit, child: Text('Nova estufa')),
                 if (current.isDrying) const PopupMenuItem(value: _MenuAction.stop, child: Text('Parar secagem')),
-                // A API só exclui estufa sem leituras: não oferece o que depois recusaria.
-                if (latest == null && !current.isDrying) const PopupMenuItem(value: _MenuAction.delete, child: Text('Excluir estufa')),
+                // A API só exclui estufa parada e sem leituras: nos outros casos a opção aparece desativada, com o motivo.
+                _deleteItem(current),
               ],
             ),
         ],
@@ -579,7 +596,7 @@ class _UnitPageState extends State<UnitPage> {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: () => Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => UnitChartPage(unitId: widget.unitId, limits: limits, isDrying: current.isDrying),
+          builder: (_) => UnitChartPage(unitId: widget.unitId, limits: limits, isDrying: current.isDrying, batchStartedAt: current.cycleStartedAt),
         )),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
@@ -587,7 +604,12 @@ class _UnitPageState extends State<UnitPage> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Row(children: [
-                const Expanded(child: Text('Temperatura nas últimas 24 h', style: TextStyle(fontWeight: FontWeight.w700))),
+                Expanded(
+                  child: Text(
+                    current.cycleStartedAt == null ? 'Temperatura da estufada' : 'Temperatura da estufada de ${f.dayMonth(current.cycleStartedAt!)}',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
                 Text('Ver gráfico', style: TextStyle(fontSize: 13, color: context.colors.textSecondary)),
                 Icon(Icons.chevron_right, color: context.colors.muted),
               ]),
@@ -604,8 +626,12 @@ class _UnitPageState extends State<UnitPage> {
                         format: format,
                         gap: Duration(seconds: (data.bucketSeconds * 3).clamp(300, 1 << 30)),
                         height: 90,
-                        semanticLabel: 'Temperatura nas últimas 24 horas',
-                        emptyText: current.isDrying ? 'Sem leituras neste período.' : 'Sem leituras com a secagem parada.',
+                        semanticLabel: 'Temperatura da estufada',
+                        emptyText: current.cycleStartedAt == null
+                            ? 'Nenhuma estufada ainda.'
+                            : current.isDrying
+                                ? 'Sem leituras nesta estufada ainda.'
+                                : 'Sem leituras nesta estufada.',
                       ),
               ),
             ],

@@ -11,11 +11,11 @@ import { alertActions, alertCard, featuredAlert, isStale, phaseCheckLabel, phase
 
 const POLL_MS = 5000;
 const SERIES_REFRESH_MS = 60_000;
+// O gráfico é da estufada (a carga atual, ou a última), não da estufa: "all" é a estufada inteira.
 const PERIODS = [
-  { value: 6, label: "6 h" },
-  { value: 24, label: "24 h" },
-  { value: 24 * 7, label: "7 dias" },
-  { value: 24 * 30, label: "30 dias" },
+  { value: "all", label: "Estufada toda" },
+  { value: 24, label: "Últimas 24 h" },
+  { value: 6, label: "Últimas 6 h" },
 ];
 
 export function renderUnit(ctx) {
@@ -69,10 +69,9 @@ export function renderUnit(ctx) {
   }
 
   async function loadSeries() {
-    const until = new Date();
-    const since = new Date(until.getTime() - state.hours * 3_600_000);
+    const hours = state.hours === "all" ? "" : `&hours=${state.hours}`;
     try {
-      series = await api.get(`${base}/series?since=${encodeURIComponent(since.toISOString())}&until=${encodeURIComponent(until.toISOString())}&points=240`);
+      series = await api.get(`${base}/series?batch=true&points=240${hours}`);
       seriesLoadedAt = Date.now();
       chartNode = null;
     } catch (error) {
@@ -155,7 +154,8 @@ export function renderUnit(ctx) {
       ["Renomear", "edit", () => rename(unit)],
       unit.is_drying ? ["Parar secagem", "stop", (target) => stopDrying(target)] : null,
       // A API só exclui estufa sem leituras: não oferece o que depois recusaria.
-      !latest && !unit.is_drying ? ["Excluir estufa", "delete", () => removeUnit(unit)] : null,
+      // A API só exclui estufa parada e sem leituras: nos outros casos a opção aparece desativada, com o motivo.
+      ["Excluir estufa", "delete", () => removeUnit(unit), deleteBlocker(unit, latest)],
     ].filter(Boolean);
     return h(
       "details",
@@ -164,13 +164,14 @@ export function renderUnit(ctx) {
       h(
         "div",
         { class: "menu-list", role: "menu" },
-        items.map(([label, iconName, onClick]) =>
+        items.map(([label, iconName, onClick, blocker]) =>
           h(
             "button",
             {
               type: "button",
               role: "menuitem",
               class: `menu-item ${iconName === "delete" || iconName === "stop" ? "is-danger" : ""}`,
+              disabled: Boolean(blocker),
               onClick: (event) => {
                 const target = event.currentTarget;
                 target.closest("details").open = false;
@@ -178,11 +179,18 @@ export function renderUnit(ctx) {
               },
             },
             icon(iconName),
-            label,
+            blocker ? h("span", { class: "menu-item-text" }, label, h("span", { class: "menu-item-hint" }, blocker)) : label,
           ),
         ),
       ),
     );
+  }
+
+  /** Por que a estufa não pode ser excluída agora; null quando pode. */
+  function deleteBlocker(unit, latest) {
+    if (unit.is_drying) return "Pare a secagem antes.";
+    if (latest) return "Tem leituras salvas: o histórico das estufadas fica guardado.";
+    return null;
   }
 
   function rename(unit) {
@@ -433,7 +441,8 @@ export function renderUnit(ctx) {
     const phases = chartPhases(series, isTemp);
     const stats = series?.stats;
     const stat = (label, value) => h("div", {}, h("dt", {}, label), h("dd", {}, stats?.count ? format(toDisplay(value)) : "--"));
-    const periodLabel = PERIODS.find((item) => item.value === state.hours).label;
+    const hasBatch = Boolean(unit.cycle_started_at);
+    const periodText = state.hours === "all" ? "na estufada" : `nas últimas ${state.hours} h da estufada`;
 
     if (!chartNode && series) {
       chartNode = lineChart({
@@ -456,8 +465,12 @@ export function renderUnit(ctx) {
         detail: (point) => (point.count > 1 ? `${format(point.low)} a ${format(point.high)}` : "1 leitura"),
         gapMs: Math.max(5 * 60_000, series.bucket_seconds * 3000),
         height: 260,
-        label: `${isTemp ? "Temperatura" : "Umidade"} nas últimas ${periodLabel}`,
-        emptyText: unit.is_drying ? "Sem leituras neste período." : "Sem leituras. Elas só são gravadas com a secagem ligada.",
+        label: `${isTemp ? "Temperatura" : "Umidade"} ${periodText}`,
+        emptyText: !hasBatch
+          ? "Nenhuma estufada ainda. O gráfico começa quando a secagem for iniciada."
+          : unit.is_drying
+            ? "Sem leituras neste período da estufada."
+            : "Sem leituras nesta estufada. Elas só são gravadas com a secagem ligada.",
       });
     }
 
@@ -467,9 +480,12 @@ export function renderUnit(ctx) {
       h(
         "div",
         { class: "card-header" },
-        h("h2", {}, icon("chart"), "Gráfico"),
-        button("CSV", { variant: "btn-ghost btn-sm", iconName: "download", "aria-label": "Baixar CSV do período", onClick: (event) => exportCsv(event.currentTarget, unit) }),
+        h("h2", {}, icon("chart"), "Gráfico da estufada"),
+        button("CSV", { variant: "btn-ghost btn-sm", iconName: "download", "aria-label": "Baixar CSV do período", disabled: !series || !hasBatch, onClick: (event) => exportCsv(event.currentTarget, unit) }),
       ),
+      hasBatch
+        ? h("p", { class: "small muted" }, `${unit.is_drying ? "Estufada em andamento" : "Última estufada"}, iniciada em ${f.dateTime(unit.cycle_started_at)}.`)
+        : null,
       h(
         "div",
         { class: "filters" },
@@ -505,14 +521,15 @@ export function renderUnit(ctx) {
     );
   }
 
+  /** As leituras do mesmo período do gráfico. */
   async function exportCsv(target, unit) {
-    const until = new Date();
-    const since = new Date(until.getTime() - state.hours * 3_600_000);
+    if (!series) return;
+    const suffix = state.hours === "all" ? "estufada" : `estufada-${state.hours}h`;
     try {
       await withBusy(target, () =>
         api.download(
-          `${base}/readings.csv?since=${encodeURIComponent(since.toISOString())}&until=${encodeURIComponent(until.toISOString())}`,
-          `leituras-${unit.name.replace(/[^\w-]+/g, "_")}-${state.hours}h.csv`,
+          `${base}/readings.csv?since=${encodeURIComponent(series.since)}&until=${encodeURIComponent(series.until)}`,
+          `leituras-${unit.name.replace(/[^\w-]+/g, "_")}-${suffix}.csv`,
         ),
       );
     } catch (error) {

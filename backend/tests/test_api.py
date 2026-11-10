@@ -1,6 +1,6 @@
 from core.config import settings
 import pytest
-from conftest import Sim, register, send_reading, set_stage
+from conftest import Sim, add_past_readings, register, send_reading, set_stage
 
 
 def test_register_validates_input(client):
@@ -263,6 +263,22 @@ def test_series_groups_readings(client, auth, drying_unit):
     empty = client.get(f"/curing_units/{unit_id}/series?since=2000-01-01T00:00:00Z&until=2000-01-02T00:00:00Z", headers=auth)
     assert empty.json()["points"] == []
     assert empty.json()["stats"]["count"] == 0
+
+
+def test_batch_series_starts_with_the_current_batch(client, auth, drying_unit):
+    unit_id = drying_unit["unit"]["id"]
+    # Leituras de antes da estufada (outra carga) não entram no gráfico dela.
+    add_past_readings(unit_id, range(120, 130), temperature=60)
+    send_reading(client, temperature=40)
+
+    series = client.get(f"/curing_units/{unit_id}/series?batch=true", headers=auth).json()
+    assert series["stats"]["count"] == 1
+    assert series["stats"]["temperature_max"] == 40
+    unit = client.get(f"/curing_units/{unit_id}", headers=auth).json()
+    assert series["since"][:19] == unit["cycle_started_at"][:19]
+
+    recent = client.get(f"/curing_units/{unit_id}/series?batch=true&hours=6", headers=auth).json()
+    assert recent["since"][:19] == unit["cycle_started_at"][:19]
 
 
 def test_csv_export(client, auth, drying_unit):

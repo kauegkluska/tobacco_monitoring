@@ -284,12 +284,17 @@ def get_curing_unit_series(
     since: datetime | None = Query(None, description="Início do período (padrão: 24 h atrás)"),
     until: datetime | None = Query(None, description="Fim do período (padrão: agora)"),
     points: int = Query(240, ge=10, le=2000, description="Quantidade máxima de pontos no gráfico"),
+    batch: bool = Query(False, description="Período da estufada atual ou da última (ignora since e until)"),
+    hours: float | None = Query(None, gt=0, description="Com batch: só as últimas horas da estufada"),
     db: Session = Depends(get_db),
     unit: CuringUnit = Depends(get_owned_curing_unit),
 ):
     """Leituras agrupadas em intervalos iguais, para gráficos de períodos longos."""
-    until = _naive_utc(until) or utcnow()
-    since = _naive_utc(since) or until - timedelta(hours=24)
+    if batch:
+        since, until = _batch_window(unit, hours)
+    else:
+        until = _naive_utc(until) or utcnow()
+        since = _naive_utc(since) or until - timedelta(hours=24)
     if since >= until:
         raise HTTPException(status_code=422, detail="O início do período deve ser anterior ao fim")
 
@@ -361,6 +366,21 @@ def get_curing_unit_series(
         "stats": stats,
         "phases": _phases_between(unit, since, until),
     }
+
+
+def _batch_window(unit: CuringUnit, hours: float | None) -> tuple[datetime, datetime]:
+    """Início e fim da estufada atual (ou da última encerrada). Sem estufada, uma janela vazia que termina agora."""
+    now = utcnow()
+    cycle = unit.cycles[-1] if unit.cycles else None
+    start = cycle.started_at if cycle else unit.cycle_started_at
+    if start is None:
+        return now - timedelta(hours=hours or 24), now
+    end = cycle.ended_at if cycle and cycle.ended_at else now
+    # Estufada que acabou de começar: o período não pode ser vazio.
+    end = max(end, start + timedelta(minutes=1))
+    if hours is not None:
+        start = max(start, end - timedelta(hours=hours))
+    return start, end
 
 
 def _phases_between(unit: CuringUnit, since: datetime, until: datetime) -> list[dict]:
