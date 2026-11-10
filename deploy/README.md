@@ -3,6 +3,14 @@
 Comandos para a máquina virtual onde a API roda (`/opt/estufa/tobacco_monitoring`, usuário `opc`). O código chega
 sozinho pelo `estufa-update.timer` (`git pull` a cada 2 min); o que está aqui é a configuração que fica fora do git.
 
+O clone do servidor é parcial (*sparse checkout*): só `backend` e `frontend` vão para o disco. Na primeira vez, inclua
+esta pasta:
+
+```bash
+cd /opt/estufa/tobacco_monitoring
+git sparse-checkout add deploy
+```
+
 ## 1. Chave do gateway e modo de produção
 
 Fora de `ENVIRONMENT=development` a API só aceita leituras com o header `X-API-Key` igual a `GATEWAY_API_KEY`; sem a

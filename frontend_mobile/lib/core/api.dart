@@ -15,14 +15,17 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
-/// Servidor na internet usado pelo app instalado no celular do produtor.
-const productionBaseUrl = 'http://137.131.176.80:8000';
+/// Servidor na internet usado pelo app instalado no celular do produtor (HTTPS pelo Caddy, ver deploy/README.md).
+const productionBaseUrl = 'https://137-131-176-80.sslip.io';
+
+/// Endereço anterior, sem criptografia: quem o tem salvo passa para o HTTPS ao abrir o app.
+const legacyProductionBaseUrl = 'http://137.131.176.80:8000';
 
 /// Endereço padrão. Em desenvolvimento, o emulador Android enxerga o computador em 10.0.2.2.
 String defaultBaseUrl() {
   if (kIsWeb) {
     final base = Uri.base;
-    if (base.scheme.startsWith('http') && base.port == 8000) return base.origin;
+    if (base.scheme == 'https' || (base.scheme == 'http' && base.port == 8000)) return base.origin;
     return 'http://${base.host.isEmpty ? '127.0.0.1' : base.host}:8000';
   }
   if (defaultTargetPlatform == TargetPlatform.android) return kReleaseMode ? productionBaseUrl : 'http://10.0.2.2:8000';
@@ -98,7 +101,11 @@ class ApiClient {
 
   Future<void> load() async {
     final storage = await SharedPreferences.getInstance();
-    final saved = storage.getString(_baseKey);
+    var saved = storage.getString(_baseKey);
+    if (saved != null && _normalize(saved) == legacyProductionBaseUrl) {
+      saved = productionBaseUrl;
+      await storage.setString(_baseKey, saved);
+    }
     hasSavedBaseUrl = saved != null && saved.trim().isNotEmpty;
     if (hasSavedBaseUrl) baseUrl = _normalize(saved!);
     _accessToken = storage.getString(_accessKey);

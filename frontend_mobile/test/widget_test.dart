@@ -36,6 +36,20 @@ Widget _wrap(Widget child, {ApiClient? api}) {
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
+  test('endereço antigo do servidor, sem criptografia, passa para o HTTPS', () async {
+    SharedPreferences.setMockInitialValues({'api_base_url': 'http://137.131.176.80:8000/'});
+    final api = ApiClient();
+    await api.load();
+    expect(api.baseUrl, productionBaseUrl);
+    expect(productionBaseUrl, startsWith('https://'));
+
+    // Um servidor escolhido pelo produtor (rede local) fica como está.
+    SharedPreferences.setMockInitialValues({'api_base_url': 'http://192.168.0.14:8000'});
+    final local = ApiClient();
+    await local.load();
+    expect(local.baseUrl, 'http://192.168.0.14:8000');
+  });
+
   group('umidade como bulbo úmido', () {
     Widget tile(Limits limits, {required double wetBulb, double dryBulb = 37.0}) => Scaffold(
           body: ReadingTile(

@@ -7,8 +7,8 @@ const HTTP_TIMEOUT_MS = 3000;
 // "%31[^;]" no sscanf do receiver: IDs maiores tornam o pacote inválido.
 const MAX_ID_LENGTH = 31;
 
-// API_FIXA do receiver.ino: usada quando a página é aberta direto do disco.
-const API_FIXA = "http://137.131.176.80:8000";
+// Servidor na internet, usado quando a página é aberta direto do disco (HTTPS pelo Caddy, ver deploy/README.md).
+const API_FIXA = "https://137-131-176-80.sslip.io";
 
 function defaultApiBase() {
   const { protocol, origin, pathname } = window.location;
