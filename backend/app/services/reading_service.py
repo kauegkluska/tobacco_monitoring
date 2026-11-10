@@ -101,7 +101,8 @@ def ingest_telemetry(db: Session, data: TelemetryInput) -> dict:
     db.add(reading)
     db.flush()
     evaluate_reading(db, unit, device, reading)
-    update_outputs(db, unit, reading.temperature, reading.humidity)
+    # Depois do motor de alertas, que grava a mediana de 30 s e marca os saltos.
+    update_outputs(db, unit, reading)
     result["stored"] = True
     finish(None)
     db.refresh(reading)

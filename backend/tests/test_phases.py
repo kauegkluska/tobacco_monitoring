@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from conftest import Sim, add_past_readings, send_reading, set_stage, shift_stage_start
+from conftest import Sim, add_past_readings, hold, send_reading, set_stage, shift_stage_start
 from core.clock import utcnow
 from core.database import SessionLocal
 from models.curing_unit import CuringUnit
@@ -69,16 +69,17 @@ def test_finishing_by_hand_stops_the_drying(client, auth, drying_unit):
     assert restarted["curing_stage"] == "Amarelação"
 
 
-def test_outputs_follow_the_new_phase_range(client, auth, drying_unit):
+def test_outputs_follow_the_new_phase_range(client, auth, drying_unit, clock):
     # 45 °C está acima da Amarelação (35–40), mas dentro do Murchamento (40–48).
-    client.patch(
-        f"/curing_units/{drying_unit['unit']['id']}/outputs", json={"temperature_trigger": "temperature_out"}, headers=auth,
-    )
+    unit_id = drying_unit["unit"]["id"]
+    client.patch(f"/curing_units/{unit_id}/outputs", json={"temperature_trigger": "temperature_out"}, headers=auth)
     response = send_reading(client, 45.0, 85.0)
     assert response.json()["rele_temperatura"] is True
-    set_stage(client, auth, drying_unit["unit"]["id"], "Murchamento")
-    outputs = client.get(f"/curing_units/{drying_unit['unit']['id']}/outputs", headers=auth).json()
-    assert outputs["temperature"]["on"] is False
+    # A troca de fase vale na hora, mas respeita o tempo mínimo ligado de 2 min.
+    set_stage(client, auth, unit_id, "Murchamento")
+    assert client.get(f"/curing_units/{unit_id}/outputs", headers=auth).json()["temperature"]["on"] is True
+    response = hold(client, clock, 45.0, 85.0, 120)
+    assert response.json()["rele_temperatura"] is False
 
 
 def test_yellowing_alarm_needs_ten_minutes(client, auth, drying_unit):

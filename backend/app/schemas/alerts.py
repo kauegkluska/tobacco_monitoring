@@ -12,6 +12,8 @@ class AlertOut(BaseModel):
     severity: str
     value: float | None = None
     threshold: float | None = None
+    # Valores citados no texto, em °C (ou °C/h nas taxas): tw, tw_limite, tseco, taxa, taxa_limite.
+    details: dict[str, float] | None = None
     acknowledged_at: UTCDateTime | None
     resolved_at: UTCDateTime | None
     curing_unit_id: int

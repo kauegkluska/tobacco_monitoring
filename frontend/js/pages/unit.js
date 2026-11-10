@@ -538,12 +538,24 @@ export function renderUnit(ctx) {
       "div",
       { class: `target-row ${missing ? "is-missing" : ""}` },
       icon("thermostat"),
-      missing ? h("span", { class: "target-text" }, "Defina a temperatura alvo") : h("span", { class: "target-text" }, h("span", { class: "muted" }, "Alvo "), h("strong", {}, f.temp(target))),
+      missing
+        ? h("span", { class: "target-text" }, "Defina a temperatura alvo")
+        : h(
+            "span",
+            { class: "target-text" },
+            h("span", { class: "muted" }, "Alvo "),
+            h("strong", {}, f.temp(target)),
+            ramping(outputs) ? h("span", { class: "muted" }, ` · subindo, agora ${f.temp(outputs.target_effective)}`) : null,
+          ),
       button(missing ? "Definir" : "Alterar", { variant: "btn-ghost btn-sm", onClick: editTarget }),
     );
   }
 
-  /** Temperatura alvo da ventoinha, digitada na unidade escolhida e enviada em °C. */
+  /** O alvo efetivo ainda está subindo em rampa até o alvo. */
+  const ramping = (outputs) =>
+    outputs.target_effective !== null && outputs.target_effective !== undefined && outputs.target_effective < outputs.target_temperature - 0.01;
+
+  /** Temperatura alvo do soprador, digitada na unidade escolhida e enviada em °C. O máximo depende da fase. */
   function editTarget() {
     const current = data.outputs?.target_temperature;
     const input = h("input", {
@@ -553,7 +565,7 @@ export function renderUnit(ctx) {
       inputmode: "decimal",
       value: current === null || current === undefined ? "" : f.number(f.tempValue(current), 0).replace(",", "."),
     });
-    const phase = data.unit.phase;
+    const max = data.outputs?.target_max ?? 90;
     openModal({
       title: "Temperatura alvo",
       body: h(
@@ -563,7 +575,7 @@ export function renderUnit(ctx) {
           label: "Alvo",
           input,
           suffix: f.tempUnit(),
-          hint: phase ? `Esperado na fase: ${f.tempRange(phase.temp_min, phase.temp_max)}` : "A ventoinha liga abaixo da faixa do alvo e desliga acima dela.",
+          hint: `Máximo nesta fase: ${f.temp(max)}. O soprador sobe a temperatura aos poucos até o alvo.`,
         }),
       ),
       actions: [
@@ -574,7 +586,7 @@ export function renderUnit(ctx) {
           onClick: async (close) => {
             const typed = Number(input.value.replace(",", "."));
             const celsius = input.value.trim() === "" || Number.isNaN(typed) ? null : f.tempToCelsius(typed);
-            if (celsius === null || celsius < 20 || celsius > 90) throw new Error(`Informe um valor entre ${f.tempRange(20, 90)}.`);
+            if (celsius === null || celsius < 20 || celsius > max + 0.01) throw new Error(`Informe um valor entre ${f.tempRange(20, max)}.`);
             data.outputs = await api.patch(`${base}/outputs`, { target_temperature: Math.round(celsius * 100) / 100 });
             toast(`Alvo: ${f.temp(celsius, { digits: 0 })}.`, "success");
             close();
@@ -603,7 +615,13 @@ export function renderUnit(ctx) {
         h(
           "div",
           { class: "output-head" },
-          h("div", { class: "output-title" }, h("strong", {}, output.name), h("span", { class: "small text-2" }, output.reason)),
+          h(
+            "div",
+            { class: "output-title" },
+            h("strong", {}, output.name),
+            h("span", { class: "small text-2" }, output.reason),
+            output.values && Object.keys(output.values).length ? h("span", { class: "small muted" }, f.details(output.values)) : null,
+          ),
           output.on ? badge("info", "Ligada", "power") : badge("neutral", "Desligada", "powerOff"),
           h(
             "button",
@@ -659,7 +677,7 @@ export function renderUnit(ctx) {
   }
 
   function editOutput(key, output) {
-    const nameInput = h("input", { class: "input", value: output.name, maxlength: 40, placeholder: "Ex.: Flap, Ventoinha" });
+    const nameInput = h("input", { class: "input", value: output.name, maxlength: 40, placeholder: "Ex.: Flap, Soprador" });
     const triggerSelect = select(OUTPUT_TRIGGERS, output.trigger);
     openModal({
       title: `Editar ${output.name}`,

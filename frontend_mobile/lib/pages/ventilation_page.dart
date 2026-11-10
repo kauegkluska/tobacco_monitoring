@@ -11,7 +11,7 @@ import '../core/prefs.dart';
 import '../core/theme.dart';
 import '../widgets/common.dart';
 
-/// Comando do flap e da ventoinha, separado do acompanhamento do dia a dia.
+/// Comando do flap e do soprador, separado do acompanhamento do dia a dia.
 class VentilationPage extends StatefulWidget {
   const VentilationPage({required this.unitId, this.phase, super.key});
 
@@ -107,7 +107,7 @@ class _VentilationPageState extends State<VentilationPage> {
               autofocus: true,
               maxLength: 40,
               textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(labelText: 'Nome', hintText: 'Ex.: Flap, Ventoinha'),
+              decoration: const InputDecoration(labelText: 'Nome', hintText: 'Ex.: Flap, Soprador'),
             ),
             const SizedBox(height: 8),
             DropdownButtonFormField<String>(
@@ -142,13 +142,13 @@ class _VentilationPageState extends State<VentilationPage> {
     name.dispose();
   }
 
-  /// Temperatura alvo da ventoinha, digitada na unidade escolhida e enviada em °C.
+  /// Temperatura alvo do soprador, digitada na unidade escolhida e enviada em °C. O máximo depende da fase.
   Future<void> _editTarget() async {
     final unitPref = prefs.unit;
     final symbol = f.unitSymbol(unitPref);
     final current = outputs?.targetTemperature;
     final controller = TextEditingController(text: current == null ? '' : f.number(f.tempValue(current, unitPref), 0));
-    final phase = widget.phase;
+    final max = outputs?.targetMax ?? 90;
     String? sheetError;
     await showFormSheet<void>(
       context,
@@ -165,9 +165,8 @@ class _VentilationPageState extends State<VentilationPage> {
               decoration: InputDecoration(
                 labelText: 'Alvo',
                 suffixText: symbol,
-                helperText: phase == null
-                    ? 'A ventoinha liga abaixo da faixa do alvo e desliga acima dela.'
-                    : 'Esperado na fase: ${f.tempRange(phase.limits.tempMin, phase.limits.tempMax, unitPref)}',
+                helperText: 'Máximo nesta fase: ${f.temp(max, unitPref)}. O soprador sobe a temperatura aos poucos até o alvo.',
+                helperMaxLines: 2,
               ),
             ),
             const SizedBox(height: 20),
@@ -176,8 +175,8 @@ class _VentilationPageState extends State<VentilationPage> {
               onPressed: () async {
                 final typed = double.tryParse(controller.text.trim().replaceAll(',', '.'));
                 final celsius = typed == null ? null : f.tempToCelsius(typed, unitPref);
-                if (celsius == null || celsius < 20 || celsius > 90) {
-                  setSheetState(() => sheetError = 'Informe um valor entre ${f.tempRange(20, 90, unitPref)}.');
+                if (celsius == null || celsius < 20 || celsius > max + 0.01) {
+                  setSheetState(() => sheetError = 'Informe um valor entre ${f.tempRange(20, max, unitPref)}.');
                   return;
                 }
                 try {
@@ -218,6 +217,7 @@ class _VentilationPageState extends State<VentilationPage> {
             state: state,
             confirmedAt: data.confirmedAt,
             target: data.targetTemperature,
+            effective: data.ramping ? data.targetEffective : null,
             unit: prefs.unit,
             onMode: (mode) => _setMode(output, mode),
             onEdit: () => _edit(output, state),
@@ -281,6 +281,7 @@ class _OutputRow extends StatelessWidget {
     required this.state,
     required this.confirmedAt,
     required this.target,
+    required this.effective,
     required this.unit,
     required this.onMode,
     required this.onEdit,
@@ -292,6 +293,9 @@ class _OutputRow extends StatelessWidget {
 
   /// Temperatura alvo em °C; só aparece quando a saída segue o alvo.
   final double? target;
+
+  /// Alvo efetivo em °C enquanto a rampa ainda sobe; nulo quando já chegou ao alvo.
+  final double? effective;
   final TempUnit unit;
   final ValueChanged<String> onMode;
   final VoidCallback onEdit;
@@ -321,6 +325,11 @@ class _OutputRow extends StatelessWidget {
                 children: [
                   Text(state.name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15.5), overflow: TextOverflow.ellipsis),
                   Text(state.reason, style: TextStyle(fontSize: 13, color: context.colors.textSecondary)),
+                  if (state.values.isNotEmpty)
+                    Text(
+                      [for (final (label, text) in f.details(state.values, unit)) '$label $text'].join(' · '),
+                      style: TextStyle(fontSize: 12, color: context.colors.muted),
+                    ),
                 ],
               ),
             ),
@@ -340,7 +349,7 @@ class _OutputRow extends StatelessWidget {
         ]),
         if (state.followsTarget) ...[
           const SizedBox(height: 10),
-          _TargetRow(target: target, unit: unit, onEdit: onEditTarget),
+          _TargetRow(target: target, effective: effective, unit: unit, onEdit: onEditTarget),
         ],
         const SizedBox(height: 10),
         SegmentedButton<String>(
@@ -360,11 +369,12 @@ class _OutputRow extends StatelessWidget {
   }
 }
 
-/// Temperatura alvo da ventoinha: o valor e o botão para mudar, ou o aviso para definir.
+/// Temperatura alvo do soprador: o valor e o botão para mudar, ou o aviso para definir.
 class _TargetRow extends StatelessWidget {
-  const _TargetRow({required this.target, required this.unit, required this.onEdit});
+  const _TargetRow({required this.target, required this.effective, required this.unit, required this.onEdit});
 
   final double? target;
+  final double? effective;
   final TempUnit unit;
   final VoidCallback onEdit;
 
@@ -385,6 +395,7 @@ class _TargetRow extends StatelessWidget {
                 : Text.rich(TextSpan(children: [
                     TextSpan(text: 'Alvo  ', style: TextStyle(color: c.textSecondary)),
                     TextSpan(text: f.temp(target, unit), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
+                    if (effective != null) TextSpan(text: '  subindo, agora ${f.temp(effective, unit)}', style: TextStyle(color: c.textSecondary)),
                   ])),
           ),
           TextButton(onPressed: onEdit, child: Text(missing ? 'Definir' : 'Alterar')),

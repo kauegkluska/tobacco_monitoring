@@ -21,5 +21,7 @@ class OutputEvent(Base):
     # Leitura que provocou a mudança automática, quando houver: "temperature" (°C) ou "humidity" (%).
     metric = Column(String(20), nullable=True)
     value = Column(Float, nullable=True)
+    # Regra automática que mudou o relé: "humidity" (flap pela umidade), "target" (alvo do soprador) etc.
+    rule = Column(String(20), nullable=True)
     curing_unit_id = Column(Integer, ForeignKey("curing_units.id"), nullable=False)
     curing_unit = relationship("CuringUnit", back_populates="output_events")

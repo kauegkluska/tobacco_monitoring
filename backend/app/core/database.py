@@ -233,6 +233,19 @@ def initialize_database(target_engine=None) -> None:
         add_column("curing_units", "alert_grace_until", "DATETIME")
         add_column("curing_units", "drop_reference", "FLOAT")
         add_column("curing_units", "wet_bulb_gate_open", "BOOLEAN NOT NULL DEFAULT 1")
+        add_column("curing_units", "humidity_output_changed_at", "DATETIME")
+        add_column("curing_units", "temperature_output_changed_at", "DATETIME")
+        add_column("output_events", "rule", "VARCHAR(20)")
+        add_column("curing_units", "target_effective", "FLOAT")
+        add_column("curing_units", "target_effective_at", "DATETIME")
+        add_column("curing_units", "target_limited", "BOOLEAN NOT NULL DEFAULT 0")
+        add_column("curing_units", "fan_rate_cut", "BOOLEAN NOT NULL DEFAULT 0")
+        add_column("curing_units", "flap_humidity_open", "BOOLEAN NOT NULL DEFAULT 0")
+        add_column("curing_units", "flap_open_temperature", "FLOAT")
+        add_column("curing_units", "flap_drop_locked", "BOOLEAN NOT NULL DEFAULT 0")
+        add_column("curing_units", "sensor_fault_since", "DATETIME")
+        add_column("curing_units", "humidity_output_mode_at", "DATETIME")
+        add_column("alerts", "details", "JSON")
 
         # Uma vez só: o flap ligava também com umidade baixa, o que secava ainda mais a estufa.
         # Saídas renomeadas ficam como estão, e quem escolher a regra antiga depois não é revertido.
@@ -242,6 +255,23 @@ def initialize_database(target_engine=None) -> None:
                 "WHERE humidity_output_trigger = 'humidity_out' AND humidity_output_name = 'Flap'"
             ))
             connection.execute(text("PRAGMA user_version = 1"))
+
+        # Uma vez só: o flap passa a seguir o bulbo úmido da fase e o relé 2 passa a se chamar soprador. Quem tinha
+        # escolhido outra regra ou outro nome fica como está; quem escolher a regra antiga depois não é revertido.
+        if connection.execute(text("PRAGMA user_version")).scalar() < 2:
+            connection.execute(text(
+                "UPDATE curing_units SET humidity_output_trigger = 'humidity_phase' "
+                "WHERE humidity_output_trigger = 'humidity_high'"
+            ))
+            connection.execute(text(
+                "UPDATE curing_units SET temperature_output_name = 'Soprador' WHERE temperature_output_name = 'Ventoinha'"
+            ))
+            # Flap já em Ligada: o aviso de 12 h na Amarelação conta a partir da atualização.
+            connection.execute(text(
+                "UPDATE curing_units SET humidity_output_mode_at = CURRENT_TIMESTAMP "
+                "WHERE humidity_output_mode = 'on' AND humidity_output_mode_at IS NULL"
+            ))
+            connection.execute(text("PRAGMA user_version = 2"))
 
         # A cura passou a ter quatro fases (Amarelação, Murchamento, Secagem da folha e do talo).
         for old, new in (("Início da secagem", "Amarelação"), ("Amarelecimento", "Amarelação"), ("Murcha", "Murchamento")):

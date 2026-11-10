@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, String
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import relationship
 
 from core.clock import utcnow
@@ -18,6 +18,8 @@ class Alert(Base):
     # Valor medido e limite violado, em °C para temperatura e % para umidade.
     value = Column(Float, nullable=True)
     threshold = Column(Float, nullable=True)
+    # Valores citados no texto, em °C (ou °C/h nas taxas): tw, tw_limite, tseco, taxa, taxa_limite.
+    details = Column(JSON, nullable=True)
     acknowledged_at = Column(DateTime, nullable=True)
     resolved_at = Column(DateTime, nullable=True)
     curing_unit_id = Column(Integer, ForeignKey("curing_units.id"), nullable=False)

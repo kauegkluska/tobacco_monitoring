@@ -82,11 +82,15 @@ flowchart LR
 - Fechamento automático quando o valor volta para a faixa e se mantém por 2 min, com margem para não ficar abrindo e fechando. Reconhecer e resolver pelo app.
 
 ### Controle das saídas (relés)
-- Dois relés no sender: **Flap** (relé 1, GPIO2) e **Ventoinha** (relé 2, GPIO3), com nome editável.
-- Modos **Automático**, **Ligada** e **Desligada**.
-- **Temperatura alvo**: o produtor define o alvo (em °F) e, no automático, a ventoinha opera em uma faixa de ±2 °F em torno dele: liga abaixo da faixa, desliga acima dela e, dentro dela, mantém o estado, para o relé não ficar batendo. Sem alvo definido, a ventoinha fica desligada.
-- **Flap**: no automático, liga só com a umidade acima do máximo da fase. Com umidade baixa fica desligado, para não secar ainda mais a estufa.
-- Outras regras do automático à escolha: temperatura ou umidade fora da faixa, acima do máximo ou abaixo do mínimo.
+- Dois relés no sender: **Flap** (relé 1, GPIO2) e **Soprador** da fornalha (relé 2, GPIO3, ar de combustão), com nome editável.
+- Modos **Automático**, **Ligada** e **Desligada**. Nos manuais, as regras automáticas não atuam.
+- As regras usam a mediana de 30 s da leitura e o bulbo úmido estimado; pacotes descartados como salto não decidem nada.
+- **Flap** (regra padrão "umidade acima do limite da fase"): segue o bulbo úmido com alvo por fase. Fica fechado na Amarelação; no Murchamento o alvo acompanha o bulbo seco (38 → 40 °C entre 43 e 48 °C); na Secagem da folha abre acima de 40,0 °C e fecha abaixo de 39,0 °C; no talo, abre acima de 44,0 °C nas primeiras 18 h e, depois, só com mais de 45,0 °C por 10 min. Nunca abre por umidade baixa. Mínimo de 3 min aberto e 5 min fechado.
+- **Soprador** (regra "temperatura abaixo do alvo"): opera numa faixa de ±2 °F em torno de um alvo efetivo que sobe em rampa, na taxa máxima de aquecimento da fase, até a temperatura alvo. O alvo não pode passar da temperatura máxima da fase menos a faixa (a API recusa; na troca de fase o alvo é reduzido e o app avisa). Desliga na hora ao chegar à temperatura máxima da fase e enquanto a temperatura subir mais rápido que o limite da fase. Mínimo de 2 min ligado e desligado.
+- **Intertravamentos**: flap aberto por umidade há mais de 15 min segura a rampa do soprador; se a estufa esfria 1,5 °C com o flap aberto e o soprador ligado, o flap fecha e só reabre com a temperatura recuperada (ou com a umidade acima do teto da fase).
+- **Sensor suspeito** (congelado ou pulando): as saídas seguram o estado por 5 min e depois vão à posição de reserva da fase, com o soprador desligado.
+- Cada saída mostra o motivo do estado em texto sem números, com os valores à parte na unidade escolhida.
+- As regras antigas continuam à escolha: temperatura ou umidade fora da faixa, acima do máximo ou abaixo do mínimo.
 - **Confirmação do sender**: o app mostra quando o relé realmente mudou de estado.
 - Aviso sonoro de 2 s no gateway sempre que uma saída liga, repetido no celular (som e vibração).
 - Histórico de acionamentos.
@@ -306,11 +310,12 @@ Principais constantes do firmware:
 ## Testes
 
 ```powershell
-# API: 71 testes (autenticação, leituras, fases, secagens, alertas, saídas, mDNS, migração)
+# API: 179 testes (autenticação, leituras, fases, secagens, alertas, saídas, controle do flap e do soprador, mDNS, migração)
+# As duas curas completas simuladas levam a maior parte do tempo; para pulá-las: -k "not complete"
 cd backend
 venv\Scripts\python -m pytest
 
-# App: análise estática e 19 testes
+# App: análise estática e 25 testes
 cd frontend_mobile
 flutter analyze
 flutter test

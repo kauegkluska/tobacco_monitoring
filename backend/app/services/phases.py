@@ -21,6 +21,12 @@ HEATING_TYPE = "Aquecimento rápido"
 NO_READINGS_TYPE = "Sem novas leituras"
 SENSOR_TYPE = "Sensor suspeito"
 OVERDUE_TYPE = "Permanência longa"
+# Alertas informativos do controle do flap e do soprador.
+VERY_WET_TYPE = "Estufa muito úmida"
+WET_LOAD_TYPE = "Início da Amarelação"
+MANUAL_FLAP_TYPE = "Ventilação aberta à mão"
+TARGET_LIMITED_TYPE = "Alvo reduzido"
+WEAK_FIRE_TYPE = "Fogo fraco"
 
 
 @dataclass(frozen=True)
@@ -37,7 +43,7 @@ class Rule:
     """Um alarme por tipo; os níveis vão do mais leve ao mais grave."""
 
     type: str
-    metric: str  # "temperature", "humidity", "wet_bulb" ou "depression"
+    metric: str  # "temperature", "humidity", "wet_bulb", "depression" ou "wet_bulb_deficit" (alvo do flap menos o úmido)
     direction: str  # "high" ou "low"
     tiers: tuple[Tier, ...]
 
@@ -107,7 +113,8 @@ PHASES: tuple[Phase, ...] = (
         rules=(
             _temperature_high(47.8, 52, 2),
             _WET_BULB_HIGH,
-            Rule(HUMIDITY_LOW_TYPE, "humidity", "low", (Tier(60, "info", 15),)),
+            # Bulbo úmido 2 °C abaixo do alvo do flap por 15 min (DE).
+            Rule(HUMIDITY_LOW_TYPE, "wet_bulb_deficit", "high", (Tier(2.0, "info", 15),)),
         ),
         heating_limit=0.8,
         advance_temp_at_least=46, advance_temp_minutes=10,
@@ -182,6 +189,76 @@ def current_phase(unit) -> Phase | None:
 def next_stage(phase: Phase) -> str:
     index = phase_index(phase)
     return PHASES[index + 1].name if index + 1 < len(PHASES) else FINISHED
+
+
+@dataclass(frozen=True)
+class FlapSetting:
+    """Flap (relé 1) no automático, pelo bulbo úmido estimado (°C). Ele nunca abre por umidade baixa."""
+
+    # Alvo exibido; None quando a fase só tem limite de abertura (talo B).
+    setpoint: float | None
+    open_above: float
+    close_below: float
+    # Bulbo úmido acima do qual as exceções dos intertravamentos mantêm ou reabrem o flap.
+    ceiling: float
+    # Minutos que o bulbo úmido precisa ficar acima de `open_above` para abrir (0: abre na hora).
+    open_sustain_minutes: int = 0
+
+
+# Murchamento: o alvo acompanha a subida do bulbo seco de 43 °C a 48 °C (C10, C15; reta e banda: DE).
+WILT_SETPOINT = ((43.0, 38.0), (48.0, 40.0))
+FLAP_BAND_C = 0.5
+# Teto das exceções no Murchamento e na Secagem da folha (C05, C14).
+FLAP_LEAF_CEILING_C = 40.6
+LEAF_SETPOINT_C = 39.5
+# Talo: nas primeiras horas ainda sai água da folha e do talo (C11); banda larga pela incerteza da estimativa (C39).
+STEM_A_HOURS = 18
+STEM_A_SETPOINT_C = 43.0
+STEM_A_BAND_C = 1.0
+STEM_CEILING_C = 45.0  # DE
+# Talo B: só abre com umidade muito alta e persistente (DE); fecha junto com a folha seca (C17).
+STEM_B_OPEN_C = 45.0
+STEM_B_CLOSE_C = 43.0
+STEM_B_SUSTAIN_MINUTES = 10
+
+
+def wilting_setpoint(temperature: float) -> float:
+    """Alvo do bulbo úmido no Murchamento, pela reta em função do bulbo seco."""
+    (t_low, sp_low), (t_high, sp_high) = WILT_SETPOINT
+    fraction = min(1.0, max(0.0, (temperature - t_low) / (t_high - t_low)))
+    return sp_low + fraction * (sp_high - sp_low)
+
+
+def flap_setting(phase: Phase, temperature: float, hours_in_phase: float) -> FlapSetting | None:
+    """Regra do flap da fase. None: o flap fica fechado no automático (Amarelação: C06, C09, C54)."""
+    if phase.key == "murchamento":
+        setpoint = wilting_setpoint(temperature)
+        return FlapSetting(setpoint, setpoint + FLAP_BAND_C, setpoint - FLAP_BAND_C, FLAP_LEAF_CEILING_C)
+    if phase.key == "secagem_folha":
+        return FlapSetting(
+            LEAF_SETPOINT_C, LEAF_SETPOINT_C + FLAP_BAND_C, LEAF_SETPOINT_C - FLAP_BAND_C, FLAP_LEAF_CEILING_C,
+        )
+    if phase.key == "secagem_talo":
+        if hours_in_phase < STEM_A_HOURS:
+            return FlapSetting(
+                STEM_A_SETPOINT_C, STEM_A_SETPOINT_C + STEM_A_BAND_C, STEM_A_SETPOINT_C - STEM_A_BAND_C, STEM_CEILING_C,
+            )
+        return FlapSetting(None, STEM_B_OPEN_C, STEM_B_CLOSE_C, STEM_CEILING_C, STEM_B_SUSTAIN_MINUTES)
+    return None
+
+
+def flap_fallback_open(phase: Phase, hours_in_phase: float) -> bool:
+    """Posição do flap sem leitura confiável (sensor suspeito): aberta no Murchamento, na Secagem da folha e no talo A
+    (C05, C11, C12); fechada na Amarelação (C06) e no talo B (C11, C17)."""
+    if phase.key == "secagem_talo":
+        return hours_in_phase < STEM_A_HOURS
+    return phase.key in ("murchamento", "secagem_folha")
+
+
+def fan_tmax(phase: Phase) -> float:
+    """Temperatura máxima da fase para o soprador: o limiar de atenção do alerta "Temperatura alta"."""
+    rule = next(rule for rule in phase.rules if rule.type == TEMPERATURE_HIGH_TYPE)
+    return rule.tiers[0].threshold
 
 
 def limits_for(unit) -> dict | None:

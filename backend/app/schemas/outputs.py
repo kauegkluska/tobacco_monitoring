@@ -6,7 +6,7 @@ from schemas.common import UTCDateTime
 
 OutputMode = Literal["auto", "on", "off"]
 OutputTrigger = Literal[
-    "humidity_out", "humidity_high", "humidity_low",
+    "humidity_phase", "humidity_out", "humidity_high", "humidity_low",
     "temperature_out", "temperature_high", "temperature_low", "temperature_target",
 ]
 
@@ -21,6 +21,8 @@ class OutputState(BaseModel):
     # Comando enviado ao gateway.
     on: bool
     reason: str
+    # Valores citados no motivo, em °C: tw, tw_limite, tseco, taxa, taxa_limite (o app converte a unidade).
+    values: dict[str, float] = {}
     # Estado informado pelo sender (nulo enquanto ele não informar).
     confirmed_on: bool | None = None
     # O sender informou recentemente o mesmo estado comandado.
@@ -38,9 +40,11 @@ class OutputEventOut(BaseModel):
     buzzer: bool
     # "auto", "manual" ou "stopped" (secagem parada).
     cause: str
-    # Grandeza de "value": "temperature" (°C) ou "humidity" (%).
+    # Grandeza de "value": "temperature" (°C), "wet_bulb" (°C, bulbo úmido estimado) ou "humidity" (%).
     metric: str | None = None
     value: float | None = None
+    # Regra automática que mudou o relé ("humidity", "target"...); nula nas mudanças manuais.
+    rule: str | None = None
     curing_unit_id: int
     curing_unit_name: str | None = None
 
@@ -51,6 +55,10 @@ class OutputsOut(BaseModel):
     confirmed_at: UTCDateTime | None = None
     # Temperatura alvo em °C (regra "temperature_target"); nula até o produtor definir.
     target_temperature: float | None = None
+    # Alvo efetivo (°C): sobe em rampa, na taxa da fase, até a temperatura alvo.
+    target_effective: float | None = None
+    # Maior temperatura alvo aceita na fase atual (°C).
+    target_max: float
     humidity: OutputState
     temperature: OutputState
     last_buzzer: OutputEventOut | None = None
@@ -64,7 +72,8 @@ class OutputsUpdate(BaseModel):
     temperature_name: str | None = Field(None, min_length=1, max_length=40)
     humidity_trigger: OutputTrigger | None = None
     temperature_trigger: OutputTrigger | None = None
-    target_temperature: float | None = Field(None, ge=20, le=90)
+    # O máximo depende da fase (validado no endpoint).
+    target_temperature: float | None = Field(None, ge=20)
 
     @field_validator("humidity_name", "temperature_name")
     @classmethod

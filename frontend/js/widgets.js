@@ -230,7 +230,11 @@ export function alertCard(alert, { onChange, showUnit = true } = {}) {
     ),
     h("h3", { class: "alert-title" }, showUnit ? `${alert.type} · ${unitName}` : alert.type),
     alert.message ? h("p", { class: "text-2" }, alert.message) : null,
-    hasValues ? h("p", { class: "small muted" }, `${wetBulb ? "Bulbo úmido" : "Agora"} ${value(alert.value)} · ${limitLabel} ${value(alert.threshold)}`) : null,
+    alert.details
+      ? h("p", { class: "small muted" }, f.details(alert.details))
+      : hasValues
+        ? h("p", { class: "small muted" }, `${wetBulb ? "Bulbo úmido" : "Agora"} ${value(alert.value)} · ${limitLabel} ${value(alert.threshold)}`)
+        : null,
     !alert.is_active && alert.resolved_at ? h("p", { class: "small muted" }, `Encerrado em ${f.fullDate(alert.resolved_at)}`) : null,
     h(
       "div",

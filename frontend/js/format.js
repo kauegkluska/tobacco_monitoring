@@ -33,6 +33,25 @@ export function temp(celsius, { digits = 1, unit = prefs.unit } = {}) {
   return `${number(tempValue(celsius, unit), digits)} ${tempUnit(unit)}`;
 }
 
+/** Taxa de subida (°C/h na API): a conversão para °F só multiplica, sem somar 32. */
+export function rate(celsiusPerHour, { digits = 1, unit = prefs.unit } = {}) {
+  if (celsiusPerHour === null || celsiusPerHour === undefined) return `-- ${tempUnit(unit)}/h`;
+  const value = unit === "F" ? (celsiusPerHour * 9) / 5 : celsiusPerHour;
+  return `${number(value, digits)} ${tempUnit(unit)}/h`;
+}
+
+/** Valores citados nos motivos das saídas e nos alertas (tw, tw_limite, tseco, taxa, taxa_limite, em °C). */
+export function details(values) {
+  if (!values) return "";
+  const parts = [];
+  if (values.tseco !== undefined) parts.push(`Temperatura ${temp(values.tseco)}`);
+  if (values.tw !== undefined) parts.push(`Bulbo úmido ${temp(values.tw)}`);
+  if (values.tw_limite !== undefined) parts.push(`limite do úmido ${temp(values.tw_limite)}`);
+  if (values.taxa !== undefined) parts.push(`subida ${rate(values.taxa)}`);
+  if (values.taxa_limite !== undefined) parts.push(`subida máxima ${rate(values.taxa_limite)}`);
+  return parts.join(" · ");
+}
+
 /** "95 a 104 °F" */
 export function tempRange(min, max, unit = prefs.unit) {
   return `${number(tempValue(min, unit), 0)} a ${number(tempValue(max, unit), 0)} ${tempUnit(unit)}`;

@@ -28,11 +28,11 @@ AndroidNotificationDetails _alertDetails(String ticker) => AndroidNotificationDe
       color: const Color(0xff2e7d32),
       ticker: ticker,
     );
-// Canal próprio: se o flap ou a ventoinha ciclarem à noite, não tocam como alarme.
+// Canal próprio: se o flap ou o soprador ciclarem à noite, não tocam como alarme.
 const _relayDetails = AndroidNotificationDetails(
   'saidas_estufa',
-  'Flap e ventoinha',
-  channelDescription: 'Quando o flap ou a ventoinha ligam.',
+  'Flap e soprador',
+  channelDescription: 'Quando o flap ou o soprador ligam.',
   importance: Importance.defaultImportance,
   priority: Priority.defaultPriority,
   color: Color(0xff2e7d32),

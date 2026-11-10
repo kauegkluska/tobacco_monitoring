@@ -44,24 +44,25 @@ export function playBeep() {
 
 /** Regras do modo automático das saídas (mesmos códigos da API). */
 export const OUTPUT_TRIGGERS = [
+  { value: "humidity_phase", label: "Umidade acima do limite da fase (recomendado para o flap)" },
   { value: "humidity_out", label: "Umidade fora da faixa esperada" },
   { value: "humidity_high", label: "Umidade acima do máximo" },
   { value: "humidity_low", label: "Umidade abaixo do mínimo" },
   { value: "temperature_out", label: "Temperatura fora da faixa esperada" },
   { value: "temperature_high", label: "Temperatura acima do máximo" },
   { value: "temperature_low", label: "Temperatura abaixo do mínimo" },
-  { value: "temperature_target", label: "Temperatura abaixo do alvo" },
+  { value: "temperature_target", label: "Temperatura abaixo do alvo (recomendado para o soprador)" },
 ];
 
-/** Ex.: "Ventoinhas ligou (automático, 46,0 °C)". */
+/** Ex.: "Soprador ligou (automático, 46,0 °C)". */
 export function describeOutputEvent(event) {
-  const name = event.output_name || (event.output === "temperature" ? "Ventoinha" : "Flap");
+  const name = event.output_name || (event.output === "temperature" ? "Soprador" : "Flap");
   const action = event.turned_on ? "ligou" : "desligou";
   const value =
     event.value === null || event.value === undefined
       ? null
-      : event.metric === "temperature"
-        ? f.temp(event.value)
+      : event.metric === "temperature" || event.metric === "wet_bulb"
+        ? `${event.metric === "wet_bulb" ? "bulbo úmido " : ""}${f.temp(event.value)}`
         : f.humidity(event.value);
   const cause =
     event.cause === "manual" ? "pelo painel" : event.cause === "stopped" ? "secagem parada" : value ? `automático, ${value}` : "automático";

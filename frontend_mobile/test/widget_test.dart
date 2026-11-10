@@ -103,7 +103,41 @@ void main() {
     expect(outputs.lastBuzzer!.unitName, 'Estufa 01');
     expect(describeOutputEvent(outputs.lastBuzzer!, TempUnit.celsius), 'Saída de umidade ligou (automático, 95,0%)');
     expect(describeOutputEvent(outputs.events.first, TempUnit.fahrenheit), 'Ventoinhas ligou (automático, 176,0 °F)');
-    expect(describeOutputEvent(outputs.events.last, TempUnit.celsius), 'Ventoinha desligou (secagem parada)');
+    expect(describeOutputEvent(outputs.events.last, TempUnit.celsius), 'Soprador desligou (secagem parada)');
+    // Respostas antigas, sem os campos novos, continuam legíveis.
+    expect(outputs.targetMax, 90);
+    expect(outputs.ramping, isFalse);
+    expect(outputs.humidity.values, isEmpty);
+  });
+
+  test('flap pelo bulbo úmido, rampa do soprador e valores à parte', () {
+    final outputs = Outputs.fromJson({
+      'curing_unit_id': 1,
+      'is_drying': true,
+      'target_temperature': 55.0,
+      'target_effective': 51.1,
+      'target_max': 56.09,
+      'humidity': {
+        'name': 'Flap', 'relay': 1, 'pin': 'GPIO2', 'mode': 'auto', 'trigger': 'humidity_phase', 'on': true,
+        'reason': 'Flap aberto: umidade acima do limite da fase.', 'values': {'tw': 40.2, 'tw_limite': 40.0, 'tseco': 55.0},
+      },
+      'temperature': {
+        'name': 'Soprador', 'relay': 2, 'pin': 'GPIO3', 'mode': 'auto', 'trigger': 'temperature_target', 'on': true,
+        'reason': 'A temperatura vai subir aos poucos até o alvo.', 'values': {'tseco': 50.0, 'taxa_limite': 1.1},
+      },
+      'events': [
+        {
+          'id': 9, 'timestamp': '2026-09-26T12:05:00Z', 'output': 'humidity', 'turned_on': true, 'buzzer': true,
+          'cause': 'auto', 'metric': 'wet_bulb', 'value': 40.2, 'rule': 'humidity', 'curing_unit_id': 1,
+        },
+      ],
+    });
+    expect(outputTriggers[outputs.humidity.trigger], startsWith('Umidade acima do limite da fase'));
+    expect(outputs.ramping, isTrue);
+    expect(outputs.targetMax, 56.09);
+    expect(outputs.humidity.values['tw_limite'], 40.0);
+    expect(describeOutputEvent(outputs.events.first, TempUnit.celsius), 'Flap ligou (automático, bulbo úmido 40,2 °C)');
+    expect(f.details(outputs.temperature.values, TempUnit.fahrenheit), [('Temperatura', '122,0 °F'), ('Subida máxima', '2,0 °F/h')]);
   });
 
   testWidgets('tela de login', (tester) async {

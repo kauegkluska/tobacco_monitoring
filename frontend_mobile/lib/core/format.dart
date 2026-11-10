@@ -35,6 +35,25 @@ String temp(double? celsius, TempUnit unit, {int digits = 1}) {
   return '${number(tempValue(celsius, unit), digits)} ${unitSymbol(unit)}';
 }
 
+/// Taxa de subida (°C/h na API): a conversão para °F só multiplica, sem somar 32.
+String rate(double? celsiusPerHour, TempUnit unit, {int digits = 1}) {
+  final value = celsiusPerHour == null ? null : (unit == TempUnit.fahrenheit ? celsiusPerHour * 9 / 5 : celsiusPerHour);
+  return '${number(value, digits)} ${unitSymbol(unit)}/h';
+}
+
+/// Valores citados nos motivos das saídas e nos alertas (tw, tw_limite, tseco, taxa, taxa_limite, em °C), como pares
+/// rótulo e valor formatado.
+List<(String, String)> details(Map<String, double>? values, TempUnit unit) {
+  if (values == null) return const [];
+  return [
+    if (values['tseco'] != null) ('Temperatura', temp(values['tseco'], unit)),
+    if (values['tw'] != null) ('Bulbo úmido', temp(values['tw'], unit)),
+    if (values['tw_limite'] != null) ('Limite do úmido', temp(values['tw_limite'], unit)),
+    if (values['taxa'] != null) ('Subida', rate(values['taxa'], unit)),
+    if (values['taxa_limite'] != null) ('Subida máxima', rate(values['taxa_limite'], unit)),
+  ];
+}
+
 /// "95 a 104 °F"
 String tempRange(double min, double max, TempUnit unit) {
   return '${number(tempValue(min, unit), 0)} a ${number(tempValue(max, unit), 0)} ${unitSymbol(unit)}';

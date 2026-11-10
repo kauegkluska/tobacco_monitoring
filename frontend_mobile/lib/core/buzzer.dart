@@ -27,13 +27,15 @@ class PhoneBuzzer {
   Future<void> dispose() async => _player?.dispose();
 }
 
-/// Texto curto de uma mudança de saída, ex.: "Ventoinhas ligou (automático, 46,0 °C)".
+/// Texto curto de uma mudança de saída, ex.: "Soprador ligou (automático, 46,0 °C)".
 String describeOutputEvent(OutputEvent event, TempUnit unit) {
   final action = event.turnedOn ? 'ligou' : 'desligou';
   final value = event.value == null
       ? null
       : event.metric == 'temperature'
           ? f.temp(event.value, unit)
+          : event.metric == 'wet_bulb'
+          ? 'bulbo úmido ${f.temp(event.value, unit)}'
           : f.humidity(event.value);
   final cause = switch (event.cause) {
     'manual' => 'pelo app',

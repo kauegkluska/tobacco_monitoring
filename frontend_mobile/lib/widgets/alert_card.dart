@@ -70,8 +70,12 @@ Future<void> showAlertDetails(
         const SizedBox(height: 14),
         DetailGrid(items: [
           DetailItem(label: 'Quando', value: f.relative(alert.timestamp)),
-          if (alert.value != null) DetailItem(label: alert.isWetBulb ? 'Bulbo úmido' : 'Valor', value: value(alert.value)),
-          if (alert.threshold != null) DetailItem(label: limitLabel, value: value(alert.threshold)),
+          if (alert.details != null)
+            for (final (label, text) in f.details(alert.details, unit)) DetailItem(label: label, value: text)
+          else ...[
+            if (alert.value != null) DetailItem(label: alert.isWetBulb ? 'Bulbo úmido' : 'Valor', value: value(alert.value)),
+            if (alert.threshold != null) DetailItem(label: limitLabel, value: value(alert.threshold)),
+          ],
           if (alert.resolvedAt != null) DetailItem(label: 'Encerrado', value: f.fullDate(alert.resolvedAt)),
         ]),
         if (alert.isActive && onResolve != null && !alert.isInfo) ...[

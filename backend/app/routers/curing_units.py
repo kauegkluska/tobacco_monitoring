@@ -22,7 +22,7 @@ from schemas.outputs import OutputsOut, OutputsUpdate
 from schemas.readings import ReadingOut, SeriesOut
 from services.cycle_service import FINISHED as CYCLE_FINISHED, STOPPED, close_cycle, resume_cycle, start_cycle
 from services.device_service import device_status
-from services.output_service import describe, recent_reading, update_outputs
+from services.output_service import describe, recent_reading, set_target, target_allowed, update_outputs
 from services.phases import FINISHED, NOT_STARTED, PHASES, current_phase, next_stage, phase_named
 from services.stage_service import change_stage, close_segment, cycle_hours, open_segment, phase_status, stage_hours
 
@@ -163,9 +163,8 @@ def update_curing_unit(
 
 
 def _refresh_outputs(db: Session, unit: CuringUnit) -> None:
-    """Reaplica o automático das saídas com a faixa da fase atual e a última leitura."""
-    reading = recent_reading(db, unit)
-    update_outputs(db, unit, reading.temperature if reading else None, reading.humidity if reading else None)
+    """Reaplica o automático das saídas com a regra da fase atual e a última leitura válida."""
+    update_outputs(db, unit, recent_reading(db, unit), utcnow())
 
 
 def _stop(db: Session, unit: CuringUnit, now) -> None:
@@ -207,6 +206,8 @@ def start_drying(
         unit.curing_stage = PHASES[0].name
         unit.stage_started_at = now
         unit.cycle_started_at = now
+        # A rampa do soprador recomeça na carga nova.
+        unit.target_effective = unit.target_effective_at = None
         # Alertas da estufada anterior não valem para a nova carga.
         for alert in unit.alerts:
             if alert.is_active:
@@ -471,13 +472,18 @@ def update_output_modes(
     unit: CuringUnit = Depends(get_owned_curing_unit),
 ):
     """Troca nome, regra, modo ou temperatura alvo. O gateway recebe o novo comando na resposta da próxima leitura."""
+    now = utcnow()
+    if data.humidity_mode is not None and data.humidity_mode != unit.humidity_output_mode:
+        unit.humidity_output_mode_at = now
     for output in ("humidity", "temperature"):
         for field in ("mode", "name", "trigger"):
             value = getattr(data, f"{output}_{field}")
             if value is not None:
                 setattr(unit, f"{output}_output_{field}", value)
     if data.target_temperature is not None:
-        unit.target_temperature = data.target_temperature
+        if not target_allowed(unit, data.target_temperature):
+            raise HTTPException(status_code=422, detail="A temperatura alvo passa do máximo da fase.")
+        set_target(db, unit, data.target_temperature, now)
     _refresh_outputs(db, unit)
     db.commit()
     db.refresh(unit)

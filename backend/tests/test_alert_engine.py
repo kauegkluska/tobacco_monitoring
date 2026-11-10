@@ -24,6 +24,7 @@ from services.phases import (
     TEMPERATURE_HIGH_TYPE,
     WET_BULB_HIGH_TYPE,
 )
+from services import messages
 from services.psychrometrics import wet_bulb
 from services.stage_service import phase_status
 
@@ -120,14 +121,19 @@ def test_requested_reduction_does_not_raise_a_drop(unit_id):
     assert DROP_TYPE not in sim.active()
 
 
-def test_reduction_after_high_wet_bulb_stays_quiet_past_the_suppression(unit_id):
+def test_drop_after_high_wet_bulb_is_no_longer_suppressed(unit_id):
+    # "Umidade alta" pede para não subir o fogo, não para baixar: a queda depois dela é alertada (supressão retirada).
     sim = after_grace(unit_id, "Murchamento", 46, humidity_for(46, 42))
     sim.run(4, 46, humidity_for(46, 42))
     assert WET_BULB_HIGH_TYPE in sim.active()
+    # Sem o flap no automático da simulação, o relé está fechado: o texto pede para abrir.
+    assert sim.active()[WET_BULB_HIGH_TYPE].message == "Umidade alta: abra Flap."
     sim.run(4, 41, 70)
     assert WET_BULB_HIGH_TYPE not in sim.active()
-    sim.run(140, 41, 70)
-    assert DROP_TYPE not in sim.active()
+    sim.run(10, 41, 70)
+    drop = sim.active()[DROP_TYPE]
+    assert drop.message == messages.DROP
+    assert drop.details == {"tseco": pytest.approx(41.0, abs=0.05)}
 
 
 def test_drop_after_suppression_uses_the_new_reference(unit_id):
@@ -258,8 +264,9 @@ def test_depression_waits_for_the_calculated_grace(unit_id):
     alert = sim.active()[DEPRESSION_HIGH_TYPE]
     assert alert.severity == "warning"
     assert alert.value is None and alert.threshold is None
-    assert "Feche o flap" in alert.message
-    assert "°" not in alert.message
+    # Flap fechado: a secura vem de frestas, não da ventilação.
+    assert alert.message == "Ar seco: confira portas e frestas; não aumente o fogo."
+    assert set(alert.details) == {"tw", "tseco"}
 
 
 def test_depression_closes_below_the_margin(unit_id):
@@ -466,21 +473,28 @@ def test_relays_follow_the_raw_reading_with_the_same_margins():
 
 # Outras regras
 def test_low_humidity_is_informative_only_in_wilting(unit_id):
-    sim = after_grace(unit_id, "Murchamento", 45, 50)
-    sim.run(20, 45, 50)
+    # Murchamento a 45 °C: alvo do flap 38,8 °C; ar seco com o úmido 2 °C abaixo dele (36,8 °C) por 15 min.
+    sim = after_grace(unit_id, "Murchamento", 45, humidity_for(45, 38.8))
+    sim.run(10, 45, humidity_for(45, 36.0))
+    assert HUMIDITY_LOW_TYPE not in sim.active()
+    sim.run(10, 45, humidity_for(45, 36.0))
     alert = sim.active()[HUMIDITY_LOW_TYPE]
     assert alert.severity == "info"
+    assert alert.message == "Ar seco: se os estaleiros de cima ainda não amarelaram, segure a temperatura."
+    assert alert.value is None and alert.threshold is None
+    assert alert.details["tw_limite"] == pytest.approx(36.8, abs=0.01)
+    assert alert.details["tw"] == pytest.approx(36.0, abs=0.05)
     sim.change_stage("Secagem da folha")
-    sim.run(1, 45, 50)
+    sim.run(1, 45, humidity_for(45, 36.0))
     assert HUMIDITY_LOW_TYPE not in sim.active()
 
 
-def test_low_humidity_closes_with_three_points_of_margin(unit_id):
-    sim = after_grace(unit_id, "Murchamento", 45, 50)
-    sim.run(20, 45, 50)
-    sim.run(4, 45, 62)
+def test_low_humidity_closes_with_half_a_degree_of_margin(unit_id):
+    sim = after_grace(unit_id, "Murchamento", 45, humidity_for(45, 36.0))
+    sim.run(20, 45, humidity_for(45, 36.0))
+    sim.run(4, 45, humidity_for(45, 36.9))
     assert HUMIDITY_LOW_TYPE in sim.active()
-    sim.run(4, 45, 63.5)
+    sim.run(4, 45, humidity_for(45, 37.4))
     assert HUMIDITY_LOW_TYPE not in sim.active()
 
 

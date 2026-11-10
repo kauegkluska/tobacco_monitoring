@@ -1,6 +1,12 @@
 // Modelos da API. Temperaturas em °C; datas convertidas para o horário local.
 
 double? _double(dynamic value) => value == null ? null : (value as num).toDouble();
+
+/// Valores em °C (ou °C/h) por chave: tw, tw_limite, tseco, taxa, taxa_limite.
+Map<String, double>? _values(dynamic value) {
+  if (value is! Map) return null;
+  return {for (final entry in value.entries) if (entry.value is num) entry.key.toString(): (entry.value as num).toDouble()};
+}
 int? _int(dynamic value) => value == null ? null : (value as num).toInt();
 DateTime? _date(dynamic value) => value == null ? null : DateTime.tryParse(value.toString())?.toLocal();
 
@@ -122,7 +128,7 @@ class CuringUnit {
   final int activeAlerts;
   final int criticalAlerts;
 
-  /// Temperatura alvo da ventoinha em °C, definida pelo produtor.
+  /// Temperatura alvo do soprador em °C, definida pelo produtor.
   final double? targetTemperature;
 
   /// Horas com a secagem ligada, sem o tempo parado: na fase atual e na estufada.
@@ -224,6 +230,7 @@ class AlertItem {
         isActive = json['is_active'] == true,
         value = _double(json['value']),
         threshold = _double(json['threshold']),
+        details = _values(json['details']),
         timestamp = _date(json['timestamp']) ?? DateTime.now(),
         acknowledgedAt = _date(json['acknowledged_at']),
         resolvedAt = _date(json['resolved_at']),
@@ -237,6 +244,9 @@ class AlertItem {
   final bool isActive;
   final double? value;
   final double? threshold;
+
+  /// Valores citados no texto, em °C: tw, tw_limite, tseco, taxa, taxa_limite. Nulo nos alertas antigos.
+  final Map<String, double>? details;
   final DateTime timestamp;
   final DateTime? acknowledgedAt;
   final DateTime? resolvedAt;
@@ -435,13 +445,14 @@ String? rangeState(double? value, double min, double max) {
 
 /// Regras do modo automático das saídas (mesmos códigos da API).
 const outputTriggers = {
+  'humidity_phase': 'Umidade acima do limite da fase (recomendado para o flap)',
   'humidity_out': 'Umidade fora da faixa esperada',
   'humidity_high': 'Umidade acima do máximo',
   'humidity_low': 'Umidade abaixo do mínimo',
   'temperature_out': 'Temperatura fora da faixa esperada',
   'temperature_high': 'Temperatura acima do máximo',
   'temperature_low': 'Temperatura abaixo do mínimo',
-  'temperature_target': 'Temperatura abaixo do alvo',
+  'temperature_target': 'Temperatura abaixo do alvo (recomendado para o soprador)',
 };
 
 /// Saída (relé do sender) comandada pela API: "auto" segue [trigger]; "on"/"off" são manuais.
@@ -454,6 +465,7 @@ class OutputState {
         trigger = json['trigger']?.toString() ?? 'humidity_out',
         on = json['on'] == true,
         reason = json['reason']?.toString() ?? '',
+        values = _values(json['values']) ?? const {},
         confirmedOn = json['confirmed_on'] as bool?,
         inSync = json['in_sync'] == true;
 
@@ -467,13 +479,16 @@ class OutputState {
   final bool on;
   final String reason;
 
+  /// Valores citados no motivo, em °C: tw, tw_limite, tseco, taxa_limite.
+  final Map<String, double> values;
+
   /// Estado informado pelo sender; nulo enquanto ele não informar.
   final bool? confirmedOn;
 
   /// O sender informou há pouco o mesmo estado do comando.
   final bool inSync;
 
-  /// No automático, segue a temperatura alvo (ventoinha).
+  /// No automático, segue a temperatura alvo (soprador).
   bool get followsTarget => trigger == 'temperature_target';
 }
 
@@ -500,13 +515,13 @@ class OutputEvent {
   final bool buzzer;
   final String cause;
 
-  /// Grandeza de [value]: "temperature" (°C) ou "humidity" (%).
+  /// Grandeza de [value]: "temperature" (°C), "wet_bulb" (°C, bulbo úmido estimado) ou "humidity" (%).
   final String? metric;
   final double? value;
   final int unitId;
   final String? unitName;
 
-  String get displayName => outputName ?? (output == 'temperature' ? 'Ventoinha' : 'Flap');
+  String get displayName => outputName ?? (output == 'temperature' ? 'Soprador' : 'Flap');
 }
 
 class Outputs {
@@ -515,6 +530,8 @@ class Outputs {
         isDrying = json['is_drying'] == true,
         confirmedAt = _date(json['confirmed_at']),
         targetTemperature = _double(json['target_temperature']),
+        targetEffective = _double(json['target_effective']),
+        targetMax = _double(json['target_max']) ?? 90,
         humidity = OutputState.fromJson(json['humidity'] as Map<String, dynamic>),
         temperature = OutputState.fromJson(json['temperature'] as Map<String, dynamic>),
         lastBuzzer = json['last_buzzer'] == null ? null : OutputEvent.fromJson(json['last_buzzer'] as Map<String, dynamic>),
@@ -528,6 +545,15 @@ class Outputs {
 
   /// Temperatura alvo em °C (regra "temperature_target"); nula até o produtor definir.
   final double? targetTemperature;
+
+  /// Alvo efetivo em °C: sobe em rampa, na taxa da fase, até [targetTemperature].
+  final double? targetEffective;
+
+  /// Maior alvo aceito na fase atual, em °C.
+  final double targetMax;
+
+  /// O alvo efetivo ainda está subindo até o alvo.
+  bool get ramping => targetTemperature != null && targetEffective != null && targetEffective! < targetTemperature! - 0.01;
   final OutputState humidity;
   final OutputState temperature;
   final OutputEvent? lastBuzzer;

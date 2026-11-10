@@ -80,7 +80,7 @@ export function renderSettings(ctx) {
         "div",
         { class: "form" },
         choice(
-          "Apitar neste aparelho quando a ventoinha ou o flap ligar",
+          "Apitar neste aparelho quando o soprador ou o flap ligar",
           segmented(
             [
               { value: true, label: "Ligado" },

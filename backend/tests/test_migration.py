@@ -39,18 +39,51 @@ def test_legacy_database_is_migrated(tmp_path):
         assert connection.execute(text("SELECT COUNT(*) FROM readings")).scalar() == 1
         assert connection.execute(text("PRAGMA foreign_key_check")).fetchall() == []
         assert "value" in {row[1] for row in connection.execute(text("PRAGMA table_info(alerts)"))}
-        # Relé 1 vira o flap e relé 2 a ventoinha, que segue a temperatura alvo.
+        # Relé 1 vira o flap e relé 2 o soprador, que segue a temperatura alvo.
         outputs = connection.execute(text(
             "SELECT humidity_output_name, temperature_output_name, temperature_output_trigger, target_temperature "
             "FROM curing_units"
         )).fetchone()
-        assert tuple(outputs) == ("Flap", "Ventoinha", "temperature_target", None)
-        # O flap deixa de ligar com umidade baixa.
-        assert connection.execute(text("SELECT humidity_output_trigger FROM curing_units")).scalar() == "humidity_high"
+        assert tuple(outputs) == ("Flap", "Soprador", "temperature_target", None)
+        # O flap passa pela regra antiga de umidade acima do máximo e chega à regra do bulbo úmido da fase.
+        assert connection.execute(text("SELECT humidity_output_trigger FROM curing_units")).scalar() == "humidity_phase"
+        assert connection.execute(text("PRAGMA user_version")).scalar() == 2
+        unit_columns = {row[1] for row in connection.execute(text("PRAGMA table_info(curing_units)"))}
+        assert {
+            "target_effective", "flap_humidity_open", "flap_drop_locked", "sensor_fault_since", "humidity_output_mode_at",
+        } <= unit_columns
+        assert "details" in {row[1] for row in connection.execute(text("PRAGMA table_info(alerts)"))}
+        assert "rule" in {row[1] for row in connection.execute(text("PRAGMA table_info(output_events)"))}
 
-    # A correção roda uma vez só: a escolha feita depois pelo produtor continua valendo.
+    # As correções rodam uma vez só: as escolhas feitas depois pelo produtor continuam valendo.
     with engine.begin() as connection:
-        connection.execute(text("UPDATE curing_units SET humidity_output_trigger = 'humidity_out'"))
+        connection.execute(text(
+            "UPDATE curing_units SET humidity_output_trigger = 'humidity_high', temperature_output_name = 'Ventoinha'"
+        ))
     initialize_database(engine)
     with engine.connect() as connection:
-        assert connection.execute(text("SELECT humidity_output_trigger FROM curing_units")).scalar() == "humidity_out"
+        row = connection.execute(text("SELECT humidity_output_trigger, temperature_output_name FROM curing_units")).fetchone()
+        assert tuple(row) == ("humidity_high", "Ventoinha")
+
+
+def test_renamed_outputs_and_manual_flap_in_the_second_migration(tmp_path):
+    engine = create_engine(f"sqlite:///{(tmp_path / 'legacy.db').as_posix()}")
+    with engine.begin() as connection:
+        for statement in LEGACY_SCHEMA:
+            connection.execute(text(statement))
+    initialize_database(engine)
+    # Simula um banco da versão anterior (user_version 1) com nomes e modo escolhidos pelo produtor.
+    with engine.begin() as connection:
+        connection.execute(text(
+            "UPDATE curing_units SET humidity_output_trigger = 'humidity_out', temperature_output_name = 'Fornalha', "
+            "humidity_output_mode = 'on', humidity_output_mode_at = NULL"
+        ))
+        connection.execute(text("PRAGMA user_version = 1"))
+    initialize_database(engine)
+    with engine.connect() as connection:
+        row = connection.execute(text(
+            "SELECT humidity_output_trigger, temperature_output_name, humidity_output_mode_at FROM curing_units"
+        )).fetchone()
+        assert row[0] == "humidity_out" and row[1] == "Fornalha"
+        # Flap já em Ligada: o aviso de 12 h na Amarelação passa a contar da atualização.
+        assert row[2] is not None
