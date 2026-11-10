@@ -19,6 +19,8 @@ class TelemetryInput(BaseModel):
     battery_level: int | None = Field(None, ge=0, le=100)
     rssi: int | None = None
     snr: float | None = None
+    # Contador N do pacote LoRa, repassado pelo receiver: o mesmo número de novo é descartado como repetido.
+    packet_number: int | None = Field(None, ge=0)
     # Estado real dos relés do sender (R1/R2 no pacote LoRa), repassado pelo receiver.
     output_humidity_state: bool | None = None
     output_temperature_state: bool | None = None
@@ -35,6 +37,7 @@ class ReadingOut(BaseModel):
     humidity: float
     timestamp: UTCDateTime
     curing_unit_id: int
+    device_id: int | None = None
 
     model_config = {"from_attributes": True}
 
@@ -103,8 +106,12 @@ class IngestResult(BaseModel):
     # procura a primeira ocorrência de cada chave no texto.
     rele_umidade: bool = False
     rele_temperatura: bool = False
+    # Toca o aviso sonoro do gateway: uma saída ligada pelo app ou um alerta de atenção ou mais grave desde a resposta
+    # anterior. As saídas no automático não tocam, senão o soprador bipa a cada ciclo.
+    aviso: bool = False
     stored: bool
-    # Motivo quando a leitura não foi gravada: "no_measurement", "no_curing_unit" ou "drying_not_started".
+    # Motivo quando a leitura não foi gravada: "no_measurement", "no_curing_unit", "drying_not_started" ou "duplicate"
+    # (mesmo contador N do pacote anterior).
     reason: str | None = None
     device_id: int
     curing_unit_id: int | None = None

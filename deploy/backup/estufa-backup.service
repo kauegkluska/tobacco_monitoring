@@ -1,0 +1,10 @@
+[Unit]
+Description=Backup do banco do Monitor de Estufa
+
+[Service]
+Type=oneshot
+User=opc
+Environment=APP_DIR=/opt/estufa/tobacco_monitoring
+Environment=DEST=/home/opc/backup-estufa/auto
+Environment=KEEP_DAYS=14
+ExecStart=/bin/bash /opt/estufa/tobacco_monitoring/deploy/backup/estufa-backup.sh

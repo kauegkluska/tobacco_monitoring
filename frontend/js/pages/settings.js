@@ -80,7 +80,7 @@ export function renderSettings(ctx) {
         "div",
         { class: "form" },
         choice(
-          "Apitar neste aparelho quando o soprador ou o flap ligar",
+          "Apitar neste aparelho quando o soprador ou o flap for ligado pelo app (no automático, não apita)",
           segmented(
             [
               { value: true, label: "Ligado" },

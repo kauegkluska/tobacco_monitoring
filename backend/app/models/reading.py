@@ -20,4 +20,6 @@ class Reading(Base):
     is_outlier = Column(Boolean, nullable=False, default=False)
     timestamp = Column(DateTime, default=utcnow)
     curing_unit_id = Column(Integer, ForeignKey("curing_units.id"), nullable=False)
+    # Dispositivo que enviou a leitura; nulo nas leituras gravadas antes deste campo.
+    device_id = Column(Integer, ForeignKey("devices.id"), nullable=True)
     curing_unit = relationship("CuringUnit", back_populates="readings")

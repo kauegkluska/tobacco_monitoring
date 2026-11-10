@@ -8,7 +8,7 @@ A comunicação usa duas placas Heltec WiFi LoRa 32 V3:
 
 | Sketch | Função |
 |---|---|
-| [sender/sender.ino](sender/sender.ino) | Fica na estufa. Lê o SHT40, mostra no LCD e transmite via LoRa a cada 2 s. Logo depois escuta o gateway por 1,2 s e aplica nos relés (GPIO2/GPIO3) o comando do app. Não usa Wi-Fi. |
+| [sender/sender.ino](sender/sender.ino) | Fica na estufa. Lê o SHT40, mostra no LCD e transmite via LoRa a cada 5 s. Logo depois escuta o gateway por 1,2 s e aplica nos relés (GPIO2/GPIO3) o comando do app. Não usa Wi-Fi. |
 | [receiver/receiver.ino](receiver/receiver.ino) | Gateway. Recebe os pacotes LoRa, envia cada leitura para `POST /readings/readings/`, responde ao sender com o comando dos relés e toca o aviso sonoro no GPIO5. |
 
 ```
@@ -33,10 +33,14 @@ O receiver envia para a API o RSSI e o SNR do enlace LoRa medidos na recepção.
 A resposta da API a cada leitura começa com o comando das duas saídas:
 
 ```json
-{"rele_umidade": false, "rele_temperatura": true, "stored": true, ...}
+{"rele_umidade": false, "rele_temperatura": true, "aviso": false, "stored": true, ...}
 ```
 
-O receiver guarda esses valores por sender, repassa-os no downlink seguinte e toca o buzzer do GPIO5 por 2 s sempre que um deles passa de `false` para `true`. O comando chega aos relés em até dois ciclos (cerca de 4 s).
+O receiver guarda esses valores por sender e repassa-os no downlink seguinte. O comando chega aos relés em até dois ciclos (cerca de 10 s).
+
+O buzzer do GPIO5 toca por 2 s quando a resposta traz `"aviso": true`. Quem decide é o servidor: uma saída ligada pelo app ou um alerta novo de atenção ou mais grave desde a resposta anterior. As saídas no automático não tocam, senão o soprador bipa a cada ciclo.
+
+O receiver também repassa o contador `N` do pacote LoRa (`packet_number`): a API descarta um pacote com o mesmo número do anterior (`"reason": "duplicate"`), mas devolve o comando dos relés normalmente.
 
 No app e no painel (**Início > Saídas e aviso sonoro**), cada saída tem:
 
@@ -60,7 +64,7 @@ Os relés começam desligados ao ligar o sender e **mantêm o último comando** 
    `localhost` e `127.0.0.1` apontam para o próprio ESP32, não para o computador.
 
 4. No **receiver**, `CURING_UNIT_ID` indica a estufa de destino. Com `0`, a API usa a estufa vinculada ao `controller_id` no painel ou no app. Um valor diferente só é aceito se aquela estufa estiver vinculada ao mesmo dispositivo; caso contrário, a API usa a estufa vinculada.
-5. Se o backend tiver `GATEWAY_API_KEY` no `.env`, coloque o mesmo valor em `GATEWAY_API_KEY` no receiver.
+5. Coloque em `GATEWAY_API_KEY` no receiver o mesmo valor do `.env` do backend. Fora de `development` a chave é obrigatória: sem ela, a API recusa as leituras.
 6. No painel, em **Estufas**, vincule o `CONTROLLER_ID` do sender a uma estufa e clique em **Iniciar secagem**. Sem isso, a API recebe as leituras (resposta `202`) mas não as grava. O monitor serial do receiver mostra o motivo.
 7. Abra cada pasta no Arduino IDE e grave cada sketch na sua placa.
 

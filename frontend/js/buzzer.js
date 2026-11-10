@@ -1,4 +1,4 @@
-// Aviso sonoro: o gateway bipa quando uma saída liga; o painel repete o aviso neste aparelho.
+// Aviso sonoro: o gateway bipa quando uma saída é ligada pelo app (no automático, não); o painel repete o aviso aqui.
 
 import { api } from "./api.js";
 import { toast } from "./dom.js";

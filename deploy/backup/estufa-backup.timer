@@ -1,0 +1,10 @@
+[Unit]
+Description=Backup do banco do Monitor de Estufa a cada 6 horas
+
+[Timer]
+OnCalendar=*-*-* 00/6:00:00
+# Se a máquina estava desligada no horário, faz a cópia assim que voltar.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

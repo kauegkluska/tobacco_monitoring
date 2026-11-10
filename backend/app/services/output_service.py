@@ -438,6 +438,11 @@ def recent_reading(db: Session, unit: CuringUnit) -> Reading | None:
     return reading
 
 
+def rings(event: OutputEvent) -> bool:
+    """O aviso sonoro toca quando uma saída é ligada pelo app; no automático, não (o soprador bipa a cada ciclo)."""
+    return bool(event.turned_on) and event.cause == "manual"
+
+
 def commands(unit: CuringUnit | None) -> dict:
     """Chaves lidas pelo firmware do gateway (receiver.ino)."""
     if unit is None:
@@ -524,7 +529,7 @@ def describe(db: Session, unit: CuringUnit, events: int = 10) -> dict:
     )
     last_buzzer = (
         db.query(OutputEvent)
-        .filter(OutputEvent.curing_unit_id == unit.id, OutputEvent.turned_on.is_(True))
+        .filter(OutputEvent.curing_unit_id == unit.id, OutputEvent.turned_on.is_(True), OutputEvent.cause == "manual")
         .order_by(OutputEvent.id.desc())
         .first()
     )
@@ -562,7 +567,7 @@ def serialize_event(event: OutputEvent, unit: CuringUnit | None = None) -> dict:
         "output": event.output,
         "output_name": name_of(unit, event.output) if unit else DEFAULT_NAMES.get(event.output),
         "turned_on": event.turned_on,
-        "buzzer": event.turned_on,
+        "buzzer": rings(event),
         "cause": event.cause,
         # Eventos antigos, sem "metric", vinham sempre da grandeza de mesmo nome da saída.
         "metric": event.metric or (event.output if event.value is not None else None),

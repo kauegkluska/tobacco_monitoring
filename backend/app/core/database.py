@@ -246,6 +246,9 @@ def initialize_database(target_engine=None) -> None:
         add_column("curing_units", "sensor_fault_since", "DATETIME")
         add_column("curing_units", "humidity_output_mode_at", "DATETIME")
         add_column("alerts", "details", "JSON")
+        add_column("readings", "device_id", "INTEGER REFERENCES devices(id)")
+        add_column("devices", "last_packet_number", "INTEGER")
+        add_column("devices", "buzzer_checked_at", "DATETIME")
 
         # Uma vez só: o flap ligava também com umidade baixa, o que secava ainda mais a estufa.
         # Saídas renomeadas ficam como estão, e quem escolher a regra antiga depois não é revertido.

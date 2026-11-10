@@ -26,7 +26,7 @@ Copie `.env.example` para `.env` e ajuste. Tudo é opcional:
 |---|---|
 | `ENVIRONMENT` | `development` devolve o código de redefinição de senha na resposta. Use `production` quando houver envio por e-mail/SMS. |
 | `SECRET_KEY` | Assina os tokens de login. Sem ela, uma chave aleatória é criada em `data/secret_key`. |
-| `GATEWAY_API_KEY` | Se definida, o gateway precisa enviar o header `X-API-Key` com o mesmo valor. |
+| `GATEWAY_API_KEY` | O gateway envia o header `X-API-Key` com o mesmo valor. Obrigatória fora de `development`: sem ela, nenhuma leitura é aceita. |
 | `CORS_ORIGINS` | Origens liberadas para o navegador (`*` ou lista separada por vírgulas). |
 | `DEVICE_OFFLINE_SECONDS` | Segundos sem leitura até o dispositivo aparecer como offline, o "Sem sinal" da interface (padrão 90). |
 | `ATMOSPHERIC_PRESSURE_KPA` | Pressão usada para estimar o bulbo úmido (padrão 90,8, Lages a 916 m). |

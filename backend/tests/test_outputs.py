@@ -60,8 +60,9 @@ def test_auto_mode_turns_on_outside_the_safe_range_with_hysteresis(client, auth,
     # O valor registrado é a mediana de 30 s, não a leitura bruta.
     assert events[2]["metric"] == "humidity"
     assert abs(events[2]["value"] - 97.0) < 0.05
-    assert outputs["last_buzzer"]["output"] == "temperature"
-    assert outputs["last_buzzer"]["buzzer"] is True
+    # No automático o aviso sonoro não toca (o soprador bipa a cada ciclo): só o que o app liga.
+    assert outputs["last_buzzer"] is None
+    assert not any(event["buzzer"] for event in events)
 
 
 def test_manual_mode_is_sent_even_without_drying(client, auth):
@@ -116,8 +117,10 @@ def test_output_events_feed_is_private_and_incremental(client, auth, drying_unit
     assert client.get(f"/output-events/?after_id={first[0]['id']}", headers=auth).json() == []
     hold(client, clock, 34.0, 85.0, 180)
     hold(client, clock, 30.0, 85.0, 180)
+    assert client.get(f"/output-events/?after_id={first[0]['id']}&buzzer=true", headers=auth).json() == []
+    client.patch(f"/curing_units/{drying_unit['unit']['id']}/outputs", json={"humidity_mode": "on"}, headers=auth)
     newer = client.get(f"/output-events/?after_id={first[0]['id']}&buzzer=true", headers=auth).json()
-    assert [(e["output"], e["buzzer"]) for e in newer] == [("temperature", True)]
+    assert [(e["output"], e["cause"], e["buzzer"]) for e in newer] == [("humidity", "manual", True)]
 
     from conftest import register
     other = register(client, login="vizinho")
@@ -289,3 +292,38 @@ def test_target_is_limited_by_the_phase(client, auth, drying_unit):
     assert "limitado" not in changed["temperature"]["reason"]
     active = {alert["type"] for alert in client.get("/alerts/?active=true", headers=auth).json()}
     assert "Alvo reduzido" not in active
+
+
+def test_gateway_buzzer_rings_for_manual_commands_and_alerts_only(client, auth, drying_unit, clock):
+    from core.database import SessionLocal
+    from models.alert import Alert
+
+    unit_id = drying_unit["unit"]["id"]
+    client.patch(f"/curing_units/{unit_id}/outputs", json={"target_temperature": 36}, headers=auth)
+    assert send_reading(client, 37.0, 85.0).json()["aviso"] is False
+    # Soprador ligando e desligando no automático: nenhum bipe.
+    for temperature in (33.0, 33.0, 39.0, 39.0):
+        clock.advance(60)
+        assert send_reading(client, temperature, 85.0).json()["aviso"] is False
+
+    # Ligado pelo app: toca uma vez, na resposta seguinte.
+    clock.advance(1)
+    client.patch(f"/curing_units/{unit_id}/outputs", json={"humidity_mode": "on"}, headers=auth)
+    clock.advance(2)
+    assert send_reading(client, 39.0, 85.0).json()["aviso"] is True
+    clock.advance(2)
+    assert send_reading(client, 39.0, 85.0).json()["aviso"] is False
+
+    # Alerta novo de atenção ou mais grave também toca; informativo não.
+    clock.advance(1)
+    with SessionLocal() as db:
+        db.add(Alert(curing_unit_id=unit_id, type="Teste", message="Informativo", severity="info", timestamp=clock.now))
+        db.commit()
+    clock.advance(2)
+    assert send_reading(client, 39.0, 85.0).json()["aviso"] is False
+    clock.advance(1)
+    with SessionLocal() as db:
+        db.add(Alert(curing_unit_id=unit_id, type="Teste", message="Atenção", severity="warning", timestamp=clock.now))
+        db.commit()
+    clock.advance(2)
+    assert send_reading(client, 39.0, 85.0).json()["aviso"] is True

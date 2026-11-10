@@ -8,7 +8,7 @@ class AppPrefs extends ChangeNotifier {
   TempUnit unit = TempUnit.fahrenheit;
   ThemeMode themeMode = ThemeMode.system;
 
-  /// Toca e vibra o celular quando o gateway aciona o aviso sonoro (uma saída ligou).
+  /// Toca e vibra o celular quando o gateway aciona o aviso sonoro (uma saída ligada pelo app).
   bool phoneBuzzer = true;
 
   /// Notificações com o app fechado (serviço em segundo plano no Android). O usuário ativa no Perfil.

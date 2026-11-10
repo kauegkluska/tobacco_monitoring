@@ -239,6 +239,25 @@ def test_gateway_key(client, auth, drying_unit, monkeypatch):
     assert response.status_code == 201
 
 
+def test_gateway_key_is_required_outside_development(client, auth, drying_unit, monkeypatch):
+    monkeypatch.setattr(settings, "GATEWAY_API_KEY", None)
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    # Sem chave configurada, nada entra: nem com um header qualquer.
+    assert send_reading(client).status_code == 503
+    assert client.post("/readings/readings/", json={"temperature": 40, "humidity": 60, "controller_id": "ESP32-TOBACCO-01"},
+                       headers={"X-API-Key": "chute"}).status_code == 503
+    monkeypatch.setattr(settings, "ENVIRONMENT", "development")
+    assert send_reading(client).status_code == 201
+
+
+def test_web_panel_files_are_revalidated(client):
+    # O navegador confere a versão a cada abertura: uma atualização do servidor chega sem Ctrl+F5.
+    response = client.get("/app/js/widgets.js")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-cache"
+    assert client.get("/app/js/widgets.js", headers={"If-None-Match": response.headers["etag"]}).status_code == 304
+
+
 def test_readings_since_and_limit(client, auth, drying_unit):
     for temperature in (40, 41, 42):
         send_reading(client, temperature=temperature)
@@ -323,3 +342,25 @@ def test_web_panel_is_served(client):
     response = client.get("/", follow_redirects=False)
     assert response.status_code in (302, 307)
     assert client.get("/health").json() == {"status": "ok"}
+
+
+def test_reading_keeps_the_device_and_drops_repeated_packets(client, auth, drying_unit):
+    first = send_reading(client, packet_number=7)
+    assert first.status_code == 201
+    assert first.json()["reading"]["device_id"] == drying_unit["device"]["id"]
+
+    # O mesmo contador de novo é o mesmo pacote: não grava, mas devolve o comando dos relés.
+    repeated = send_reading(client, packet_number=7)
+    assert repeated.status_code == 202
+    assert repeated.json()["reason"] == "duplicate"
+    assert "rele_umidade" in repeated.json()
+
+    assert send_reading(client, packet_number=8).status_code == 201
+    # Sender reiniciado: o contador volta ao começo e a leitura vale.
+    assert send_reading(client, packet_number=0).status_code == 201
+    # Gateway antigo, sem contador: grava sempre.
+    assert send_reading(client).status_code == 201
+    assert send_reading(client).status_code == 201
+
+    readings = client.get("/readings/", headers=auth).json()
+    assert len(readings) == 5

@@ -49,8 +49,8 @@ flowchart LR
     WEB <--> API
 ```
 
-1. O **sender** lê o SHT40 a cada 2 s, mostra os valores no LCD e transmite por LoRa. Logo depois escuta o gateway por 1,2 s e aplica nos relés o comando recebido.
-2. O **receiver** encaminha cada leitura para a API, responde ao sender com o comando dos relés e toca um aviso sonoro quando uma saída liga.
+1. O **sender** lê o SHT40 a cada 5 s, mostra os valores no LCD e transmite por LoRa. Logo depois escuta o gateway por 1,2 s e aplica nos relés o comando recebido.
+2. O **receiver** encaminha cada leitura para a API, responde ao sender com o comando dos relés e toca um aviso sonoro quando o servidor pede: saída ligada pelo app ou alerta novo de atenção ou mais grave.
 3. A **API** grava o histórico, abre e fecha alertas, decide o estado das saídas e se anuncia na rede local para que o gateway e o app a encontrem sem IP fixo.
 4. O **app** e o **painel web** mostram a situação da estufa em linguagem simples e permitem controlar a secagem e as saídas.
 
@@ -92,7 +92,7 @@ flowchart LR
 - Cada saída mostra o motivo do estado em texto sem números, com os valores à parte na unidade escolhida.
 - As regras antigas continuam à escolha: temperatura ou umidade fora da faixa, acima do máximo ou abaixo do mínimo.
 - **Confirmação do sender**: o app mostra quando o relé realmente mudou de estado.
-- Aviso sonoro de 2 s no gateway sempre que uma saída liga, repetido no celular (som e vibração).
+- Aviso sonoro de 2 s no gateway quando uma saída é ligada pelo app ou abre um alerta de atenção ou mais grave; os acionamentos do automático não bipam. O celular repete o aviso das saídas (som e vibração); os alertas têm notificação própria.
 - Histórico de acionamentos.
 
 ### App Android
@@ -287,7 +287,7 @@ Variáveis de `backend/.env` (todas opcionais):
 | `SECRET_KEY` | gerada automaticamente | Chave de assinatura dos tokens. Sem ela, uma chave aleatória é salva em `data/secret_key`. |
 | `ACCESS_TOKEN_MINUTES` | `15` | Validade do token de acesso. |
 | `REFRESH_TOKEN_DAYS` | `30` | Validade da sessão. |
-| `GATEWAY_API_KEY` | vazio | Quando definida, o gateway precisa enviar `X-API-Key` com o mesmo valor (`GATEWAY_API_KEY` no `receiver.ino`). |
+| `GATEWAY_API_KEY` | vazio | O gateway envia `X-API-Key` com o mesmo valor (`GATEWAY_API_KEY` no `segredos.h` do receiver). Obrigatória fora de `development`: sem ela, a API recusa todas as leituras. Implantação no servidor (chave, backup e HTTPS): [deploy/README.md](deploy/README.md). |
 | `CORS_ORIGINS` | `*` | Origens liberadas para o navegador, separadas por vírgula. |
 | `DEVICE_OFFLINE_SECONDS` | `90` | Tempo sem leituras até o sensor aparecer como offline ("Sem sinal"). |
 | `ATMOSPHERIC_PRESSURE_KPA` | `90.8` | Pressão usada para estimar o bulbo úmido (padrão: Lages, 916 m). |
@@ -304,7 +304,7 @@ Principais constantes do firmware:
 | `sender.ino` | `CONTROLLER_ID` | Identificador do sensor, usado para vincular no app |
 | `sender.ino` | `RELE_LIGADO` / `RELE_DESLIGADO` | Inverta para módulos de relé ativos em nível baixo |
 | `receiver.ino` | `API_FIXA` | Endereço fixo da API; vazio usa a descoberta automática |
-| `receiver.ino` | `GATEWAY_API_KEY` | Mesma chave do backend, se configurada |
+| `receiver.ino` | `GATEWAY_API_KEY` | Mesma chave do backend (obrigatória fora de `development`) |
 | ambos | `RF_FREQUENCY` e parâmetros `LORA_*` | Devem ser iguais nas duas placas |
 
 ## Testes

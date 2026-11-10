@@ -36,7 +36,7 @@ const DEFAULTS = {
   api_path: "/readings/readings/",
   api_key: "",
   curing_unit_id: 1,
-  interval: 2,
+  interval: 5,
 };
 
 const forms = [document.getElementById("sender-form"), document.getElementById("gateway-form")];

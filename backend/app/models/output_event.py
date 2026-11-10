@@ -6,7 +6,7 @@ from core.database import Base
 
 
 class OutputEvent(Base):
-    """Mudança no comando de uma saída. Ao ligar, o gateway toca o aviso sonoro por 2 s."""
+    """Mudança no comando de uma saída. Ao ligar pelo app (manual), o gateway toca o aviso sonoro por 2 s."""
 
     __tablename__ = "output_events"
     __table_args__ = (Index("ix_output_events_unit_id", "curing_unit_id", "id"),)

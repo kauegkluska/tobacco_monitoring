@@ -17,7 +17,8 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_MINUTES: int = 15
     REFRESH_TOKEN_DAYS: int = 30
 
-    # Quando definida, o gateway ESP32 precisa enviar o header X-API-Key com este valor.
+    # O gateway ESP32 envia o header X-API-Key com este valor. Obrigatória fora de "development": sem ela, o servidor
+    # recusa todas as leituras (503).
     GATEWAY_API_KEY: str | None = None
 
     # Lista separada por vírgulas, ou "*" para liberar qualquer origem.

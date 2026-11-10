@@ -31,6 +31,10 @@ class Device(Base):
     created_at = Column(DateTime, default=utcnow, nullable=False)
     last_seen_at = Column(DateTime, nullable=True)
     status = Column(String(20), default="offline", nullable=False)
+    # Contador N do último pacote LoRa recebido: o mesmo número de novo é um pacote repetido e é descartado.
+    last_packet_number = Column(Integer, nullable=True)
+    # Até quando o gateway já foi avisado: comandos manuais e alertas depois disso tocam o aviso sonoro.
+    buzzer_checked_at = Column(DateTime, nullable=True)
 
     user = relationship("User", back_populates="devices")
     curing_units = relationship("CuringUnit", back_populates="device")

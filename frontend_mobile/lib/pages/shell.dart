@@ -97,7 +97,7 @@ class _HomeShellState extends State<HomeShell> {
     if (problem != null && mounted) showMessage(context, problem, error: true);
   }
 
-  /// Acompanha os avisos sonoros do gateway (uma saída ligou) e repete o aviso no celular.
+  /// Acompanha os avisos sonoros do gateway (uma saída ligada pelo app) e repete o aviso no celular.
   Future<void> _watchBuzzer() async {
     buzzerTimer?.cancel();
     final scope = AppScope.of(context);

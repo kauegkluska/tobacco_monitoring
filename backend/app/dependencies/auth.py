@@ -25,6 +25,17 @@ def get_current_user(
 
 
 def require_gateway_key(x_api_key: str | None = Header(default=None)) -> None:
-	"""Protege os endpoints de ingestão quando GATEWAY_API_KEY está configurada."""
-	if settings.GATEWAY_API_KEY and not keys_match(x_api_key, settings.GATEWAY_API_KEY):
+	"""Protege os endpoints de ingestão com a chave do gateway (header X-API-Key).
+
+	Fora do desenvolvimento a chave é obrigatória: sem GATEWAY_API_KEY configurada, nenhuma leitura é aceita, para que
+	um servidor exposto na internet nunca receba dados de quem só descobriu o endereço.
+	"""
+	if not settings.GATEWAY_API_KEY:
+		if settings.is_development:
+			return
+		raise HTTPException(
+			status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+			detail="GATEWAY_API_KEY não configurada no servidor",
+		)
+	if not keys_match(x_api_key, settings.GATEWAY_API_KEY):
 		raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid gateway key")

@@ -15,7 +15,8 @@
     Recebe os pacotes LoRa do sender, envia as leituras para a API via Wi-Fi
     e responde ao sender com o comando de rele (via LoRa downlink), que o
     sender aplica nos reles. O estado real dos reles (R1/R2) volta para a API.
-    GPIO5: aviso de 2 s quando um comando de rele muda de false para true.
+    GPIO5: aviso de 2 s quando a API pede ("aviso": true): saida ligada pelo app
+    ou alerta de atencao ou mais grave. As saidas no automatico nao tocam.
     =============================== */
 
     /* ===============================
@@ -45,8 +46,6 @@
     #define AVISO_PIN                5
     #define AVISO_NIVEL_ATIVO         HIGH  // Use LOW para modulo ativo em nivel baixo.
     #define AVISO_DURACAO_MS          2000UL
-    #define AVISO_POR_UMIDADE         true
-    #define AVISO_POR_TEMPERATURA     true
 
     constexpr uint8_t AVISO_NIVEL_INATIVO =
         (AVISO_NIVEL_ATIVO == HIGH) ? LOW : HIGH;
@@ -135,14 +134,15 @@
     void OnRxError(void);
     void OnTxDone(void);
     void OnTxTimeout(void);
-    bool enviarLeituraAPI(EstadoSender* sender, float temperatura, float umidade, int16_t rssi, int8_t snr, int r1, int r2);
+    bool enviarLeituraAPI(EstadoSender* sender, long numero, float temperatura, float umidade, int16_t rssi, int8_t snr, int r1, int r2);
     void enviarDownlink(const EstadoSender* sender);
     bool extrairBooleanJSON(const String &json, const char *chave, bool valorPadrao);
 
     /* ===============================
-    AVISO SONORO POR ACIONAMENTO DAS SAIDAS
-    Dispara na transicao false -> true de um dos comandos da API.
-    Nao altera os comandos dos reles nem cria regras de temperatura/umidade.
+    AVISO SONORO
+    Dispara quando a resposta da API traz "aviso": true. Quem decide e o servidor:
+    saida ligada pelo app ou alerta de atencao ou mais grave desde a resposta anterior.
+    Nao altera os comandos dos reles.
     =============================== */
 
     void desligarAviso(void* arg)
@@ -174,7 +174,7 @@
         }
 
         aviso_pronto = true;
-        Serial.println("[AVISO] GPIO5: pulso de 2 s ao ligar uma saida. Sem teste periodico.");
+        Serial.println("[AVISO] GPIO5: pulso de 2 s quando a API pede. Sem teste periodico.");
         return true;
     }
 
@@ -211,7 +211,7 @@
             return false;
         }
 
-        Serial.println("[AVISO] Acionamento detectado: aviso por 2 s.");
+        Serial.println("[AVISO] Pedido pela API: aviso por 2 s.");
         return true;
     }
 
@@ -234,23 +234,9 @@
 
     void atualizarComandosRele(EstadoSender* sender, bool novaUmidade, bool novaTemperatura)
     {
-        // Detecta cada saida separadamente: a segunda tambem pode gerar aviso
-        // mesmo que a primeira ja esteja ligada.
-        const bool ligouUmidade =
-            AVISO_POR_UMIDADE && novaUmidade && !sender->rele_umidade;
-        const bool ligouTemperatura =
-            AVISO_POR_TEMPERATURA && novaTemperatura && !sender->rele_temperatura;
-
+        // So guarda o comando; o aviso sonoro e decidido pela API (campo "aviso").
         sender->rele_umidade = novaUmidade;
         sender->rele_temperatura = novaTemperatura;
-
-        if (ligouUmidade || ligouTemperatura)
-        {
-            acionarAvisoSonoro();
-        }
-        // true -> true e true -> false nao geram outro aviso.
-        // O pulso ja iniciado termina apos 2 s, mesmo que a saida desligue antes.
-        // Este e um aviso do COMANDO da API, nao uma confirmacao fisica do rele.
     }
 
     /* ===============================
@@ -499,7 +485,7 @@
     // A API devolve os comandos no inicio da resposta do POST:
     // {"rele_umidade": true, "rele_temperatura": false, ...}
     // Eles sao configurados no app (Inicio > Saidas e aviso sonoro).
-    bool enviarLeituraAPI(EstadoSender* sender, float temperatura, float umidade, int16_t rssi, int8_t snr, int r1, int r2)
+    bool enviarLeituraAPI(EstadoSender* sender, long numero, float temperatura, float umidade, int16_t rssi, int8_t snr, int r1, int r2)
     {
         const char* controller_id = sender->id;
         if (WiFi.status() != WL_CONNECTED)
@@ -543,6 +529,9 @@
         payload += String(rssi);
         payload += ",\"snr\":";
         payload += String(snr);
+        // Contador N do pacote: a API descarta o mesmo numero repetido.
+        payload += ",\"packet_number\":";
+        payload += String(numero);
         // Estado real dos reles informado pelo sender (confirmacao no app).
         if (r1 >= 0)
         {
@@ -575,8 +564,12 @@
             const bool novaTemperatura =
                 extrairBooleanJSON(resposta, "rele_temperatura", sender->rele_temperatura);
 
-            // Preserva os comandos da API e dispara o aviso apenas ao ligar.
             atualizarComandosRele(sender, novaUmidade, novaTemperatura);
+            // Saida ligada pelo app ou alerta novo: a API pede o aviso sonoro.
+            if (extrairBooleanJSON(resposta, "\"aviso\"", false))
+            {
+                acionarAvisoSonoro();
+            }
 
             Serial.print("[API] Comando de rele atualizado -> Rele1=");
             Serial.print(sender->rele_umidade ? "LIGADO" : "desligado");
@@ -684,7 +677,7 @@
         enviarDownlink(sender);
 
         // 2) So depois manda a leitura pra API e atualiza o cache pra proxima rodada
-        enviarLeituraAPI(sender, temperatura, umidade, rssi, snr, r1, r2);
+        enviarLeituraAPI(sender, numero, temperatura, umidade, rssi, snr, r1, r2);
     }
 
     /* ===============================

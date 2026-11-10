@@ -271,7 +271,7 @@ class _SettingsPageState extends State<SettingsPage> with WidgetsBindingObserver
             value: prefs.phoneBuzzer,
             onChanged: prefs.setPhoneBuzzer,
             title: const Text('Apitar no celular', style: TextStyle(fontWeight: FontWeight.w600)),
-            subtitle: const Text('Apita e vibra quando o soprador ou o flap ligar.'),
+            subtitle: const Text('Apita e vibra quando o soprador ou o flap for ligado pelo app. No automático, não apita.'),
           ),
           Align(
             alignment: Alignment.centerLeft,

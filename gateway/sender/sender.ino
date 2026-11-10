@@ -34,7 +34,9 @@
 
 #define SDA_PIN 4
 #define SCL_PIN 5
-#define INTERVALO_ENVIO 2000
+// 5 s: a temperatura da estufa muda em graus por hora e a API filtra pela mediana de 30 s (6 leituras). Mais
+// rapido nao traz informacao e ocupa o radio (cerca de 0,18 s no ar por ciclo, com o downlink) e a internet do gateway.
+#define INTERVALO_ENVIO 5000
 #define INTERVALO_TELA 3000
 
 // Identificador único deste controlador ESP32 (use este ID para vincular no app)

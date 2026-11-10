@@ -549,7 +549,7 @@ class OutputState {
   bool get followsTarget => trigger == 'temperature_target';
 }
 
-/// Mudança no comando de uma saída. Quando ela liga, o gateway toca o aviso sonoro por 2 s.
+/// Mudança no comando de uma saída. Quando o app a liga, o gateway toca o aviso sonoro por 2 s ([buzzer]).
 class OutputEvent {
   OutputEvent.fromJson(Map<String, dynamic> json)
       : id = json['id'] as int,

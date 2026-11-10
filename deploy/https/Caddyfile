@@ -1,0 +1,6 @@
+# HTTPS na frente da API (uvicorn na porta 8000). O Caddy obtém e renova o certificado da Let's Encrypt sozinho.
+# O nome sslip.io aponta para o IP que está nele, sem precisar comprar domínio. Com domínio próprio, troque a linha.
+137-131-176-80.sslip.io {
+	encode gzip
+	reverse_proxy 127.0.0.1:8000
+}

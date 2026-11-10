@@ -39,6 +39,19 @@ MISSING_READINGS_CHECK_SECONDS = 30
 logger = logging.getLogger("uvicorn.error")
 
 
+class RevalidatedStaticFiles(StaticFiles):
+    """Arquivos do painel e do app web com "Cache-Control: no-cache".
+
+    O navegador guarda os arquivos, mas confere a cada abertura se mudaram (pelo ETag); sem mudança, o servidor responde
+    só 304, sem reenviar o arquivo. Assim uma atualização do servidor chega sem Ctrl+F5 e sem misturar versões.
+    """
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 def _check_missing_readings() -> None:
     with SessionLocal() as db:
         check_missing_readings(db)
@@ -57,6 +70,11 @@ async def _watch_missing_readings() -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     initialize_database()
+    if not settings.GATEWAY_API_KEY:
+        if settings.is_development:
+            logger.warning("GATEWAY_API_KEY não configurada: em development as leituras entram sem chave.")
+        else:
+            logger.error("GATEWAY_API_KEY não configurada: nenhuma leitura será aceita até defini-la no .env.")
     announcer = DiscoveryAnnouncer()
     await announcer.start()
     watcher = asyncio.create_task(_watch_missing_readings())
@@ -94,11 +112,11 @@ def health():
 
 if MOBILE_WEB_DIR.is_dir():
 	# Mesmo app do celular, aberto pelo navegador: http://<ip-do-computador>:8000/mobile/
-	app.mount("/mobile", StaticFiles(directory=MOBILE_WEB_DIR, html=True), name="mobile")
+	app.mount("/mobile", RevalidatedStaticFiles(directory=MOBILE_WEB_DIR, html=True), name="mobile")
 
 if FRONTEND_DIR.is_dir():
 	# Painel web servido pela própria API: http://<ip-do-computador>:8000/
-	app.mount("/app", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
+	app.mount("/app", RevalidatedStaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
 
 	@app.get("/", include_in_schema=False)
 	def root():

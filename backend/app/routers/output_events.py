@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import and_, not_
 from sqlalchemy.orm import Session
 
 from dependencies.auth import get_current_user
@@ -32,5 +33,6 @@ def list_output_events(
     if curing_unit_id is not None:
         query = query.filter(OutputEvent.curing_unit_id == curing_unit_id)
     if buzzer is not None:
-        query = query.filter(OutputEvent.turned_on.is_(buzzer))
+        rang = and_(OutputEvent.turned_on.is_(True), OutputEvent.cause == "manual")
+        query = query.filter(rang if buzzer else not_(rang))
     return [serialize_event(event) for event in query.order_by(OutputEvent.id.desc()).limit(limit).all()]

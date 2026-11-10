@@ -3,7 +3,9 @@ from sqlalchemy.orm import Session
 
 from core.clock import utcnow
 from models.curing_unit import CuringUnit
+from models.alert import Alert
 from models.device import Device
+from models.output_event import OutputEvent
 from models.reading import Reading
 from schemas.readings import TelemetryInput
 from services.alert_engine import evaluate_reading
@@ -27,6 +29,29 @@ def _resolve_unit(db: Session, device: Device, requested_unit_id: int | None) ->
         .order_by(CuringUnit.id)
         .first()
     )
+
+
+def _buzzer(db: Session, device: Device, unit: CuringUnit | None, now) -> bool:
+    """Se o gateway deve tocar o aviso: saída ligada pelo app ou alerta de atenção ou mais grave desde o último aviso."""
+    since, device.buzzer_checked_at = device.buzzer_checked_at, now
+    if unit is None or since is None:
+        return False
+    manual = (
+        db.query(OutputEvent.id)
+        .filter(
+            OutputEvent.curing_unit_id == unit.id,
+            OutputEvent.timestamp > since,
+            OutputEvent.turned_on.is_(True),
+            OutputEvent.cause == "manual",
+        )
+        .first()
+    )
+    alert = (
+        db.query(Alert.id)
+        .filter(Alert.curing_unit_id == unit.id, Alert.timestamp > since, Alert.severity != "info")
+        .first()
+    )
+    return manual is not None or alert is not None
 
 
 def ingest_telemetry(db: Session, data: TelemetryInput) -> dict:
@@ -63,6 +88,10 @@ def ingest_telemetry(db: Session, data: TelemetryInput) -> dict:
         device.rssi = data.rssi
     if data.snr is not None:
         device.snr = data.snr
+    # Pacote repetido: o mesmo contador do anterior. Um contador menor é o sender reiniciado e vale normalmente.
+    duplicate = data.packet_number is not None and data.packet_number == device.last_packet_number
+    if data.packet_number is not None:
+        device.last_packet_number = data.packet_number
 
     unit = _resolve_unit(db, device, data.curing_unit_id)
     result = {
@@ -74,10 +103,14 @@ def ingest_telemetry(db: Session, data: TelemetryInput) -> dict:
     }
 
     def finish(reason: str | None) -> dict:
+        # Depois do motor de alertas e das saídas, para o aviso já considerar o que esta leitura abriu.
+        aviso = _buzzer(db, device, unit, now)
         db.commit()
-        # Comando das saídas para o gateway; ele toca o aviso sonoro quando uma delas liga.
-        result.update(commands(unit), reason=reason)
+        result.update(commands(unit), aviso=aviso, reason=reason)
         return result
+
+    if duplicate:
+        return finish("duplicate")
 
     if unit is not None:
         record_confirmation(unit, data.output_humidity_state, data.output_temperature_state)
@@ -97,6 +130,7 @@ def ingest_telemetry(db: Session, data: TelemetryInput) -> dict:
         humidity=data.humidity,
         timestamp=now,
         curing_unit_id=unit.id,
+        device_id=device.id,
     )
     db.add(reading)
     db.flush()
