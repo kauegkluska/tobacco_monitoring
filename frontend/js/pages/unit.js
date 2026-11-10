@@ -132,7 +132,7 @@ export function renderUnit(ctx) {
         "section",
         { class: "card readings" },
         reading({ metric: "temperature", value: latest?.temperature, limits: unit.phase ? limits : null, stale, target: fanTarget(data.outputs) }),
-        reading({ metric: "humidity", value: latest?.humidity, limits: unit.phase ? limits : null, stale }),
+        reading({ metric: "humidity", value: latest?.wet_bulb, relativeHumidity: latest?.humidity, limits: unit.phase ? limits : null, stale }),
       ),
       others.length ? h("div", { class: "grid grid-3" }, others.map((alert) => alertCard(alert, { showUnit: false, onChange: reload }))) : null,
       h(
@@ -435,9 +435,10 @@ export function renderUnit(ctx) {
 
   function chartCard(unit, limits) {
     const isTemp = state.metric === "temperature";
-    const key = state.metric;
-    const toDisplay = (value) => (isTemp ? f.tempValue(value) : value);
-    const format = (value) => (isTemp ? `${f.number(value)} ${f.tempUnit()}` : `${f.number(value)}%`);
+    // Umidade em bulbo úmido estimado: também uma temperatura.
+    const key = isTemp ? "temperature" : "wet_bulb";
+    const toDisplay = (value) => f.tempValue(value);
+    const format = (value) => `${f.number(value)} ${f.tempUnit()}`;
     const phases = chartPhases(series, isTemp);
     const stats = series?.stats;
     const stat = (label, value) => h("div", {}, h("dt", {}, label), h("dd", {}, stats?.count ? format(toDisplay(value)) : "--"));
@@ -446,26 +447,28 @@ export function renderUnit(ctx) {
 
     if (!chartNode && series) {
       chartNode = lineChart({
-        points: series.points.map((point) => ({
-          t: new Date(point.timestamp),
-          v: toDisplay(point[key]),
-          low: toDisplay(point[`${key}_min`]),
-          high: toDisplay(point[`${key}_max`]),
-          count: point.count,
-        })),
+        points: series.points
+          .filter((point) => point[key] !== null && point[key] !== undefined)
+          .map((point) => ({
+            t: new Date(point.timestamp),
+            v: toDisplay(point[key]),
+            low: toDisplay(point[`${key}_min`]),
+            high: toDisplay(point[`${key}_max`]),
+            count: point.count,
+          })),
         // Com fases no período, cada uma desenha a própria faixa esperada.
         limits: phases.length
           ? null
           : isTemp
             ? { min: f.tempValue(limits.temp_min), max: f.tempValue(limits.temp_max) }
-            : { min: limits.humidity_min, max: limits.humidity_max },
+            : { min: null, max: limits.wet_bulb_max == null ? null : f.tempValue(limits.wet_bulb_max) },
         phases,
         domain: [new Date(series.since), new Date(series.until)],
         format,
         detail: (point) => (point.count > 1 ? `${format(point.low)} a ${format(point.high)}` : "1 leitura"),
         gapMs: Math.max(5 * 60_000, series.bucket_seconds * 3000),
         height: 260,
-        label: `${isTemp ? "Temperatura" : "Umidade"} ${periodText}`,
+        label: `${isTemp ? "Temperatura" : "Umidade (bulbo úmido estimado)"} ${periodText}`,
         emptyText: !hasBatch
           ? "Nenhuma estufada ainda. O gráfico começa quando a secagem for iniciada."
           : unit.is_drying

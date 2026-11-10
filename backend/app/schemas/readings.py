@@ -1,6 +1,7 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 from schemas.common import UTCDateTime
+from services.psychrometrics import estimate_wet_bulb
 
 
 class TelemetryInput(BaseModel):
@@ -37,6 +38,12 @@ class ReadingOut(BaseModel):
 
     model_config = {"from_attributes": True}
 
+    @computed_field
+    @property
+    def wet_bulb(self) -> float:
+        """Bulbo úmido estimado (°C) desta leitura: a "umidade" que o produtor lê no termômetro molhado."""
+        return estimate_wet_bulb(self.temperature, self.humidity)
+
 
 class SeriesPoint(BaseModel):
     timestamp: UTCDateTime
@@ -46,6 +53,10 @@ class SeriesPoint(BaseModel):
     humidity: float
     humidity_min: float
     humidity_max: float
+    # Bulbo úmido estimado (°C) do intervalo.
+    wet_bulb: float
+    wet_bulb_min: float
+    wet_bulb_max: float
     count: int
 
 
@@ -57,6 +68,9 @@ class SeriesStats(BaseModel):
     humidity_min: float | None = None
     humidity_avg: float | None = None
     humidity_max: float | None = None
+    wet_bulb_min: float | None = None
+    wet_bulb_avg: float | None = None
+    wet_bulb_max: float | None = None
     first_at: UTCDateTime | None = None
     last_at: UTCDateTime | None = None
 

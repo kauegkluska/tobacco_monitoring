@@ -224,6 +224,7 @@ void main() {
     });
     expect(unit.phase!.number, 2);
     expect(unit.limitsWith(null).tempMax, 48);
+    expect(unit.limitsWith(null).wetBulbMax, isNull);
     expect(unit.phase!.checks.where((check) => check.ok).length, 1);
     expect(unit.phase!.finishes, isFalse);
     expect(phaseKeyOf('Secagem do talo'), 'secagem_talo');
@@ -386,7 +387,14 @@ void main() {
             '/curing_units/' => [
                 {
                   ...drying,
-                  'latest': {'id': 9, 'temperature': 41.0, 'humidity': 85.0, 'timestamp': DateTime.now().toUtc().toIso8601String(), 'curing_unit_id': 1},
+                  'latest': {
+                    'id': 9,
+                    'temperature': 41.0,
+                    'humidity': 85.0,
+                    'wet_bulb': 38.6,
+                    'timestamp': DateTime.now().toUtc().toIso8601String(),
+                    'curing_unit_id': 1,
+                  },
                   'active_alerts': 2,
                   'critical_alerts': 1,
                 },
@@ -410,7 +418,9 @@ void main() {
       expect(find.text('Estufa 01'), findsOneWidget);
       expect(find.byWidgetPredicate((widget) => widget is StatusBadge && widget.label == 'Vá à estufa'), findsOneWidget);
       expect(find.text('105,8'), findsOneWidget);
-      expect(find.text('85,0'), findsOneWidget);
+      // Umidade como bulbo úmido, em graus; a umidade relativa fica na linha de baixo.
+      expect(find.text('101,5'), findsOneWidget);
+      expect(find.text('Bulbo úmido estimado · UR 85%'), findsOneWidget);
       expect(find.text('Esperado 95 a 104 °F'), findsOneWidget);
       expect(find.textContaining('2 alertas ativos'), findsOneWidget);
       expect(alertCount, 2);

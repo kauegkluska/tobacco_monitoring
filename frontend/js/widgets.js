@@ -97,20 +97,26 @@ export function phaseSteps(current, finished) {
 /**
  * Valor grande de temperatura ou umidade com a faixa esperada. `compact` é a versão da lista.
  * Sem `limits` (nenhuma fase em andamento) não há faixa a mostrar.
+ *
+ * A umidade aparece como bulbo úmido estimado (`value` em °C), como no termômetro molhado da estufa e nos guias de
+ * cura; a umidade relativa medida pelo sensor (`relativeHumidity`) fica na linha de baixo. Ela só tem teto, e só nas
+ * fases com o alerta "Umidade alta".
  */
-export function reading({ metric, value, limits, stale, compact = false, target = null }) {
+export function reading({ metric, value, limits, stale, compact = false, target = null, relativeHumidity = null }) {
   const isTemp = metric === "temperature";
-  const min = limits ? (isTemp ? limits.temp_min : limits.humidity_min) : null;
-  const max = limits ? (isTemp ? limits.temp_max : limits.humidity_max) : null;
-  const state = limits ? rangeState(value, min, max) : null;
+  const min = limits && isTemp ? limits.temp_min : null;
+  const max = limits ? (isTemp ? limits.temp_max : limits.wet_bulb_max ?? null) : null;
+  const hasValue = value !== null && value !== undefined;
+  const state = max === null ? null : min === null ? (hasValue && value > max ? "high" : "ok") : rangeState(value, min, max);
   const outside = !stale && (state === "high" || state === "low");
-  const show = (v) => (isTemp ? f.tempValue(v) : v);
-  const symbol = isTemp ? f.tempUnit() : "%";
-  const expected = !limits ? null : isTemp ? f.tempRange(min, max) : f.humidityRange(min, max);
+  const show = (v) => f.tempValue(v);
+  const symbol = f.tempUnit();
+  const expected = max === null ? null : isTemp ? f.tempRange(min, max) : `até ${f.temp(max)}`;
   const label = isTemp ? "Temperatura" : "Umidade";
+  const relative = isTemp ? null : `Bulbo úmido estimado · UR ${f.humidity(relativeHumidity, 0)}`;
 
   let meter = null;
-  if (!compact && limits) {
+  if (!compact && isTemp && limits) {
     // Régua: faixa esperada destacada e marcador no valor atual.
     const lo = show(min);
     const hi = show(max);
@@ -131,7 +137,7 @@ export function reading({ metric, value, limits, stale, compact = false, target 
     {
       class: `reading ${compact ? "is-compact" : ""} ${stale ? "is-stale" : ""} ${outside ? "is-out" : ""}`,
       role: "group",
-      "aria-label": `${label}: ${f.number(show(value))} ${symbol}.${expected ? ` Esperado: ${expected}.` : ""}`,
+      "aria-label": `${label}: ${f.number(show(value))} ${symbol}${relative ? ` (${relative})` : ""}.${expected ? ` Esperado: ${expected}.` : ""}`,
     },
     h(
       "p",
@@ -142,8 +148,10 @@ export function reading({ metric, value, limits, stale, compact = false, target 
     ),
     h("p", { class: "reading-value" }, h("span", { class: "reading-number num" }, f.number(show(value))), h("span", { class: "reading-unit" }, symbol)),
     meter,
+    relative ? h("p", { class: "reading-expected" }, relative) : null,
     target !== null && target !== undefined ? h("p", { class: "reading-target" }, `Alvo ${f.temp(target)}`) : null,
-    h("p", { class: "reading-expected" }, expected ? `Esperado ${expected}` : "Sem fase em andamento"),
+    // Fase sem teto do bulbo úmido (Amarelação, Secagem do talo): nada a comparar na umidade.
+    expected || !limits ? h("p", { class: "reading-expected" }, expected ? `Esperado ${expected}` : "Sem fase em andamento") : null,
   );
 }
 

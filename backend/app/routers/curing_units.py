@@ -24,6 +24,8 @@ from services.cycle_service import FINISHED as CYCLE_FINISHED, STOPPED, close_cy
 from services.device_service import device_status
 from services.output_service import describe, recent_reading, set_target, target_allowed, update_outputs
 from services.phases import FINISHED, NOT_STARTED, PHASES, current_phase, next_stage, phase_named
+from services.psychrometrics import estimate_wet_bulb
+from services.reading_stats import WET_BULB_COLUMNS, reading_stats, wet_bulb_or_estimate
 from services.stage_service import change_stage, close_segment, cycle_hours, open_segment, phase_status, stage_hours
 
 router = APIRouter()
@@ -317,14 +319,17 @@ def get_curing_unit_series(
             func.min(Reading.humidity),
             func.max(Reading.humidity),
             func.count(Reading.id),
+            *WET_BULB_COLUMNS,
         )
         .filter(*in_range)
         .group_by(bucket)
         .order_by(bucket)
         .all()
     )
-    series = [
-        {
+    series = []
+    for row in rows:
+        wet_min, wet_avg, wet_max = wet_bulb_or_estimate(row[8], row[9], row[10], row[1], row[4])
+        series.append({
             # Centro do intervalo, para o ponto ficar alinhado ao período que representa.
             "timestamp": datetime.fromtimestamp(int(row[0]) * bucket_seconds + bucket_seconds / 2, tz=timezone.utc),
             "temperature": row[1],
@@ -333,29 +338,12 @@ def get_curing_unit_series(
             "humidity": row[4],
             "humidity_min": row[5],
             "humidity_max": row[6],
+            "wet_bulb": wet_avg,
+            "wet_bulb_min": wet_min,
+            "wet_bulb_max": wet_max,
             "count": row[7],
-        }
-        for row in rows
-    ]
-
-    totals = db.query(
-        func.count(Reading.id),
-        func.min(Reading.temperature),
-        func.avg(Reading.temperature),
-        func.max(Reading.temperature),
-        func.min(Reading.humidity),
-        func.avg(Reading.humidity),
-        func.max(Reading.humidity),
-        func.min(Reading.timestamp),
-        func.max(Reading.timestamp),
-    ).filter(*in_range).one()
-    stats = dict(zip(
-        (
-            "count", "temperature_min", "temperature_avg", "temperature_max",
-            "humidity_min", "humidity_avg", "humidity_max", "first_at", "last_at",
-        ),
-        totals,
-    ))
+        })
+    stats = reading_stats(db, *in_range)
 
     return {
         "curing_unit_id": unit.id,
@@ -425,12 +413,12 @@ def export_curing_unit_readings(
     query = query.order_by(Reading.timestamp)
 
     def rows():
-        yield "﻿data_hora_utc;temperatura_c;temperatura_f;umidade_pct\r\n"
+        yield "﻿data_hora_utc;temperatura_c;temperatura_f;umidade_pct;bulbo_umido_estimado_c\r\n"
         for reading in query.yield_per(1000):
             yield (
                 f"{reading.timestamp.isoformat(sep=' ', timespec='seconds')};"
                 f"{_decimal(reading.temperature)};{_decimal(reading.temperature * 9 / 5 + 32)};"
-                f"{_decimal(reading.humidity)}\r\n"
+                f"{_decimal(reading.humidity)};{_decimal(estimate_wet_bulb(reading.temperature, reading.humidity))}\r\n"
             )
 
     filename = f"leituras-estufa-{unit.id}.csv"

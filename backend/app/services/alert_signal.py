@@ -11,9 +11,8 @@ from statistics import median
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from core.config import settings
 from models.reading import Reading
-from services.psychrometrics import wet_bulb
+from services.psychrometrics import estimate_wet_bulb
 
 FILTER_WINDOW = timedelta(seconds=30)
 
@@ -43,10 +42,6 @@ class Sample:
         return self.temperature - self.wet_bulb
 
 
-def _estimate_wet_bulb(temperature: float, humidity: float) -> float:
-    return wet_bulb(temperature, humidity, settings.ATMOSPHERIC_PRESSURE_KPA)
-
-
 def _is_jump(a: Reading, b: Reading) -> bool:
     return abs(a.temperature - b.temperature) > JUMP_TEMPERATURE_C or abs(a.humidity - b.humidity) > JUMP_HUMIDITY
 
@@ -65,7 +60,7 @@ def _coherent(item: Reading, reading: Reading, last: Reading) -> bool:
 def _set_filtered(reading: Reading, temperature: float, humidity: float) -> None:
     reading.filtered_temperature = temperature
     reading.filtered_humidity = humidity
-    reading.filtered_wet_bulb = _estimate_wet_bulb(temperature, humidity)
+    reading.filtered_wet_bulb = estimate_wet_bulb(temperature, humidity)
 
 
 def prepare_reading(db: Session, reading: Reading) -> None:
@@ -137,7 +132,7 @@ def load_samples(db: Session, unit_id: int, start: datetime, end: datetime) -> l
         .all()
     )
     return [
-        Sample(at, temperature, humidity, _estimate_wet_bulb(temperature, humidity) if estimated is None else estimated)
+        Sample(at, temperature, humidity, estimate_wet_bulb(temperature, humidity) if estimated is None else estimated)
         for at, temperature, humidity, estimated in rows
     ]
 

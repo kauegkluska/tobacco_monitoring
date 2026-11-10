@@ -9,7 +9,7 @@ from core.clock import utcnow
 from models.curing_unit import CuringUnit
 from models.reading import Reading
 from models.stage_change import StageChange
-from services.phases import PHASES, current_phase, next_stage, phase_index
+from services.phases import PHASES, current_phase, next_stage, phase_index, wet_bulb_limit
 
 
 def _open_segment(unit: CuringUnit) -> StageChange | None:
@@ -121,6 +121,7 @@ def phase_status(unit: CuringUnit, now: datetime | None = None) -> dict | None:
         "temp_max": phase.temp_max,
         "humidity_min": phase.humidity_min,
         "humidity_max": phase.humidity_max,
+        "wet_bulb_max": wet_bulb_limit(phase),
         "min_hours": phase.min_hours,
         "max_hours": phase.max_hours,
         "hours": hours,

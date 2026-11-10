@@ -255,6 +255,12 @@ def flap_fallback_open(phase: Phase, hours_in_phase: float) -> bool:
     return phase.key in ("murchamento", "secagem_folha")
 
 
+def wet_bulb_limit(phase: Phase) -> float | None:
+    """Bulbo úmido (°C) a partir do qual a fase avisa "Umidade alta"; None nas fases sem esse alerta."""
+    rule = next((rule for rule in phase.rules if rule.type == WET_BULB_HIGH_TYPE), None)
+    return rule.tiers[0].threshold if rule else None
+
+
 def fan_tmax(phase: Phase) -> float:
     """Temperatura máxima da fase para o soprador: o limiar de atenção do alerta "Temperatura alta"."""
     rule = next(rule for rule in phase.rules if rule.type == TEMPERATURE_HIGH_TYPE)

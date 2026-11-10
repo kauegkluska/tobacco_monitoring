@@ -239,9 +239,10 @@ export function renderCycle(ctx) {
 
   function chartCard(range, temp, humidity) {
     const isTemp = state.metric === "temperature";
-    const key = state.metric;
-    const toDisplay = (value) => (isTemp ? f.tempValue(value) : value);
-    const format = (value) => (isTemp ? `${f.number(value)} ${f.tempUnit()}` : `${f.number(value)}%`);
+    // Umidade em bulbo úmido estimado: também uma temperatura.
+    const key = isTemp ? "temperature" : "wet_bulb";
+    const toDisplay = (value) => f.tempValue(value);
+    const format = (value) => `${f.number(value)} ${f.tempUnit()}`;
     const phases = chartPhases(series, isTemp);
     const stats = cycle.stats;
 
@@ -258,7 +259,8 @@ export function renderCycle(ctx) {
         "dl",
         { class: "details" },
         h("div", {}, h("dt", {}, "Temperatura mín. / méd. / máx."), h("dd", {}, range(stats.temperature_min, stats.temperature_avg, stats.temperature_max, temp))),
-        h("div", {}, h("dt", {}, "Umidade mín. / méd. / máx."), h("dd", {}, range(stats.humidity_min, stats.humidity_avg, stats.humidity_max, humidity))),
+        h("div", {}, h("dt", {}, "Umidade (bulbo úmido) mín. / méd. / máx."), h("dd", {}, range(stats.wet_bulb_min, stats.wet_bulb_avg, stats.wet_bulb_max, temp))),
+        h("div", {}, h("dt", {}, "Umidade relativa mín. / méd. / máx."), h("dd", {}, range(stats.humidity_min, stats.humidity_avg, stats.humidity_max, humidity))),
       ),
       h(
         "div",
@@ -277,20 +279,22 @@ export function renderCycle(ctx) {
         ),
       ),
       lineChart({
-        points: series.points.map((point) => ({
-          t: new Date(point.timestamp),
-          v: toDisplay(point[key]),
-          low: toDisplay(point[`${key}_min`]),
-          high: toDisplay(point[`${key}_max`]),
-          count: point.count,
-        })),
+        points: series.points
+          .filter((point) => point[key] !== null && point[key] !== undefined)
+          .map((point) => ({
+            t: new Date(point.timestamp),
+            v: toDisplay(point[key]),
+            low: toDisplay(point[`${key}_min`]),
+            high: toDisplay(point[`${key}_max`]),
+            count: point.count,
+          })),
         phases,
         domain: [new Date(series.since), new Date(series.until)],
         format,
         detail: (point) => (point.count > 1 ? `${format(point.low)} a ${format(point.high)}` : "1 leitura"),
         gapMs: Math.max(5 * 60_000, series.bucket_seconds * 3000),
         height: 260,
-        label: `${isTemp ? "Temperatura" : "Umidade"} durante a secagem`,
+        label: `${isTemp ? "Temperatura" : "Umidade (bulbo úmido estimado)"} durante a secagem`,
         emptyText: "Sem leituras nesta secagem.",
       }),
       phases.length > 1 ? phaseLegend(phases) : null,

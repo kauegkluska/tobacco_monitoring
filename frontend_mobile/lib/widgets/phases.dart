@@ -6,7 +6,8 @@ import '../core/prefs.dart';
 import '../core/theme.dart';
 import 'line_chart.dart';
 
-/// Fases do período (resposta de /series) no formato do gráfico, já na unidade de exibição.
+/// Fases do período (resposta de /series) no formato do gráfico, já na unidade de exibição. A umidade é mostrada como
+/// bulbo úmido, que não tem faixa por fase: aí só a cor de fundo da fase aparece.
 List<ChartPhase> chartPhasesOf(Series series, AppColors colors, {required bool temperature, required TempUnit unit}) => [
   for (final phase in series.phases)
     ChartPhase(
@@ -14,8 +15,8 @@ List<ChartPhase> chartPhasesOf(Series series, AppColors colors, {required bool t
       end: phase.end,
       name: phase.stage,
       color: colors.phase(phase.key),
-      min: temperature ? f.tempValue(phase.tempMin, unit) : phase.humidityMin,
-      max: temperature ? f.tempValue(phase.tempMax, unit) : phase.humidityMax,
+      min: temperature ? f.tempValue(phase.tempMin, unit) : null,
+      max: temperature ? f.tempValue(phase.tempMax, unit) : null,
     ),
 ];
 

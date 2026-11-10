@@ -57,7 +57,7 @@ flowchart LR
 ## Funcionalidades
 
 ### Monitoramento
-- Temperatura (°F ou °C) e umidade relativa em tempo real, com a faixa esperada da fase destacada.
+- Temperatura (°F ou °C) e umidade em tempo real, com a faixa esperada da fase destacada. A umidade aparece como bulbo úmido estimado, em graus, como no termômetro molhado e nos guias de cura; a umidade relativa medida pelo SHT40 fica logo abaixo. Gráficos, histórico das estufadas e CSV trazem o bulbo úmido também.
 - Situação de cada estufa em uma palavra: Normal, Fora da faixa, Atenção, Crítico, Sem sinal ou Parada.
 - Gráficos de 6 horas a 30 dias, com mínima, média e máxima, e exportação para planilha (CSV).
 - Cura em quatro fases (Amarelação, Murchamento, Secagem da folha e Secagem do talo), cada uma com a própria faixa de temperatura e umidade. O app mostra o que falta para avançar e o produtor confirma olhando as folhas.

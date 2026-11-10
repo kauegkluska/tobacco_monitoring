@@ -88,19 +88,21 @@ class _UnitChartPageState extends State<UnitChartPage> {
     final data = series;
     final unitPref = prefs.unit;
     final limits = widget.limits;
-    double convert(double value) => temperature ? f.tempValue(value, unitPref)! : value;
-    String format(double value) => temperature ? '${f.number(value)} ${f.unitSymbol(unitPref)}' : '${f.number(value)}%';
+    // Umidade em bulbo úmido estimado: também uma temperatura.
+    double convert(double value) => f.tempValue(value, unitPref)!;
+    String format(double value) => '${f.number(value)} ${f.unitSymbol(unitPref)}';
     String show(double? value) => value == null ? '--' : format(convert(value));
 
     final stats = data?.stats;
     final phases = data == null ? const <ChartPhase>[] : chartPhasesOf(data, context.colors, temperature: temperature, unit: unitPref);
     final points = [
       for (final point in data?.points ?? const <SeriesPoint>[])
+        if (temperature || !point.wetBulb.isNaN)
         ChartPoint(
           point.time,
-          convert(temperature ? point.temperature : point.humidity),
-          low: convert(temperature ? point.temperatureMin : point.humidityMin),
-          high: convert(temperature ? point.temperatureMax : point.humidityMax),
+          convert(temperature ? point.temperature : point.wetBulb),
+          low: convert(temperature ? point.temperatureMin : point.wetBulbMin),
+          high: convert(temperature ? point.temperatureMax : point.wetBulbMax),
           count: point.count,
         ),
     ];
@@ -153,9 +155,9 @@ class _UnitChartPageState extends State<UnitChartPage> {
         ),
         const SizedBox(height: 14),
         Row(children: [
-          stat('Mínima', temperature ? stats?.temperatureMin : stats?.humidityMin),
-          stat('Média', temperature ? stats?.temperatureAvg : stats?.humidityAvg),
-          stat('Máxima', temperature ? stats?.temperatureMax : stats?.humidityMax),
+          stat('Mínima', temperature ? stats?.temperatureMin : stats?.wetBulbMin),
+          stat('Média', temperature ? stats?.temperatureAvg : stats?.wetBulbAvg),
+          stat('Máxima', temperature ? stats?.temperatureMax : stats?.wetBulbMax),
         ]),
         const SizedBox(height: 12),
         AnimatedOpacity(
@@ -168,14 +170,14 @@ class _UnitChartPageState extends State<UnitChartPage> {
                   start: data.since,
                   end: data.until,
                   // Com fases no período, cada uma desenha a própria faixa esperada.
-                  limitMin: phases.isNotEmpty ? null : (temperature ? f.tempValue(limits.tempMin, unitPref) : limits.humidityMin),
-                  limitMax: phases.isNotEmpty ? null : (temperature ? f.tempValue(limits.tempMax, unitPref) : limits.humidityMax),
+                  limitMin: phases.isNotEmpty || !temperature ? null : f.tempValue(limits.tempMin, unitPref),
+                  limitMax: phases.isNotEmpty ? null : f.tempValue(temperature ? limits.tempMax : limits.wetBulbMax, unitPref),
                   phases: phases,
                   format: format,
                   detail: (point) => point.count > 1 ? '${format(point.low!)} a ${format(point.high!)}' : '1 leitura',
                   gap: Duration(seconds: (data.bucketSeconds * 3).clamp(300, 1 << 30)),
                   height: 260,
-                  semanticLabel: '${temperature ? 'Temperatura' : 'Umidade'} da estufada${period.hours == null ? '' : ', últimas ${period.hours} horas'}',
+                  semanticLabel: '${temperature ? 'Temperatura' : 'Umidade (bulbo úmido estimado)'} da estufada${period.hours == null ? '' : ', últimas ${period.hours} horas'}',
                   emptyText: widget.batchStartedAt == null
                       ? 'Nenhuma estufada ainda. O gráfico começa quando a secagem for iniciada.'
                       : widget.isDrying

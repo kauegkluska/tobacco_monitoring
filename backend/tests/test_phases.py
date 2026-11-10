@@ -19,6 +19,8 @@ def test_drying_starts_in_the_first_phase(client, auth, drying_unit):
     phase = unit["phase"]
     assert (phase["number"], phase["total"], phase["key"]) == (1, 4, "amarelacao")
     assert (phase["temp_min"], phase["temp_max"], phase["humidity_min"], phase["humidity_max"]) == (35, 40, 80, 95)
+    # A Amarelação não tem alerta de bulbo úmido alto: o limite dela é a diferença entre seco e úmido.
+    assert phase["wet_bulb_max"] is None
     assert phase["next_stage"] == "Murchamento"
     assert phase["ready"] is False
     assert phase["visual_check"]
@@ -32,11 +34,13 @@ def test_phase_status_is_absent_without_drying(client, auth):
 
 def test_advancing_walks_the_four_phases_and_finishes(client, auth, drying_unit):
     unit_id = drying_unit["unit"]["id"]
-    names = []
+    names, wet_bulb_limits = [], []
     for _ in range(4):
         unit = client.post(f"/curing_units/{unit_id}/advance-stage", headers=auth).json()
         names.append(unit["curing_stage"])
+        wet_bulb_limits.append(unit["phase"]["wet_bulb_max"] if unit["phase"] else None)
     assert names == ["Murchamento", "Secagem da folha", "Secagem do talo", "Finalizado"]
+    assert wet_bulb_limits == [40.6, 40.6, None, None]
     assert unit["is_drying"] is False
     assert unit["phase"] is None
 

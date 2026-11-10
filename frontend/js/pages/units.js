@@ -110,7 +110,7 @@ export function renderUnits(ctx) {
         "div",
         { class: "readings" },
         reading({ metric: "temperature", value: latest?.temperature, limits, stale, compact: true }),
-        reading({ metric: "humidity", value: latest?.humidity, limits, stale, compact: true }),
+        reading({ metric: "humidity", value: latest?.wet_bulb, relativeHumidity: latest?.humidity, limits, stale, compact: true }),
       ),
       h("p", { class: `unit-card-foot ${unit.critical_alerts ? "is-crit" : unit.active_alerts ? "is-warn" : ""}` }, footer.join(" · ")),
     );

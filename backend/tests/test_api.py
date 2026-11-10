@@ -1,6 +1,7 @@
 from core.config import settings
 import pytest
 from conftest import Sim, add_past_readings, register, send_reading, set_stage
+from services.psychrometrics import estimate_wet_bulb
 
 
 def test_register_validates_input(client):
@@ -125,6 +126,8 @@ def test_unit_list_has_latest_reading_and_alert_counts(client, auth, drying_unit
     units = {unit["name"]: unit for unit in client.get("/curing_units/", headers=auth).json()}
     busy, empty = units["Estufa 01"], units["Estufa vazia"]
     assert busy["latest"]["temperature"] == pytest.approx(53.0, abs=0.05)
+    latest = busy["latest"]
+    assert latest["wet_bulb"] == pytest.approx(estimate_wet_bulb(latest["temperature"], latest["humidity"]))
     assert busy["active_alerts"] == 2
     assert busy["critical_alerts"] == 2
     assert empty["latest"] is None
@@ -257,6 +260,10 @@ def test_series_groups_readings(client, auth, drying_unit):
     assert series["stats"]["count"] == 3
     assert series["stats"]["temperature_max"] == 44
     assert series["stats"]["humidity_min"] == 58
+    # Bulbo úmido de cada leitura (mediana de 30 s), não das médias.
+    wet = series["stats"]
+    assert wet["wet_bulb_min"] < wet["wet_bulb_avg"] < wet["wet_bulb_max"] < 44
+    assert all(point["wet_bulb_min"] <= point["wet_bulb"] <= point["wet_bulb_max"] for point in series["points"])
     assert sum(point["count"] for point in series["points"]) == 3
     assert series["points"][-1]["timestamp"].endswith(("Z", "+00:00"))
 
@@ -286,8 +293,9 @@ def test_csv_export(client, auth, drying_unit):
     response = client.get(f"/curing_units/{drying_unit['unit']['id']}/readings.csv", headers=auth)
     assert response.status_code == 200
     lines = response.text.lstrip("﻿").strip().splitlines()
-    assert lines[0] == "data_hora_utc;temperatura_c;temperatura_f;umidade_pct"
-    assert lines[1].endswith(";25,50;77,90;61,25")
+    assert lines[0] == "data_hora_utc;temperatura_c;temperatura_f;umidade_pct;bulbo_umido_estimado_c"
+    wet_bulb = f"{estimate_wet_bulb(25.5, 61.25):.2f}".replace(".", ",")
+    assert lines[1].endswith(f";25,50;77,90;61,25;{wet_bulb}")
 
 
 def test_estimate_and_update(client, auth, drying_unit):

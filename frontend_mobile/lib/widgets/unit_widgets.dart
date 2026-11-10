@@ -24,6 +24,9 @@ String phaseCheckLabel(PhaseCheck check, TempUnit unit) {
 enum Metric { temperature, humidity }
 
 /// Valor grande de temperatura ou umidade, com a faixa esperada da fase.
+///
+/// A umidade aparece como bulbo úmido estimado, em graus, como no termômetro molhado da estufa e nos guias de cura;
+/// a umidade relativa medida pelo sensor fica na linha de baixo.
 class ReadingTile extends StatelessWidget {
   const ReadingTile({
     required this.metric,
@@ -33,13 +36,17 @@ class ReadingTile extends StatelessWidget {
     this.stale = false,
     this.compact = false,
     this.target,
+    this.relativeHumidity,
     super.key,
   });
 
   final Metric metric;
 
-  /// Em °C (temperatura) ou % (umidade).
+  /// Em °C: temperatura do ar (bulbo seco) ou bulbo úmido estimado (umidade).
   final double? value;
+
+  /// Umidade relativa (%) da mesma leitura, mostrada abaixo do bulbo úmido.
+  final double? relativeHumidity;
 
   /// Faixa da fase em andamento; nula sem fase (nada a comparar).
   final Limits? limits;
@@ -56,12 +63,15 @@ class ReadingTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final isTemp = metric == Metric.temperature;
     final range = limits;
-    final min = range == null ? null : (isTemp ? range.tempMin : range.humidityMin);
-    final max = range == null ? null : (isTemp ? range.tempMax : range.humidityMax);
-    final state = min == null || max == null ? null : rangeState(value, min, max);
-    double? display(double? v) => isTemp ? f.tempValue(v, unit) : v;
-    final symbol = isTemp ? f.unitSymbol(unit) : '%';
-    final expected = min == null || max == null ? null : (isTemp ? f.tempRange(min, max, unit) : f.humidityRange(min, max));
+    // Temperatura: faixa da fase. Umidade: só o teto do bulbo úmido, nas fases que têm o alerta "Umidade alta".
+    final min = range == null || !isTemp ? null : range.tempMin;
+    final max = range == null ? null : (isTemp ? range.tempMax : range.wetBulbMax);
+    final state = max == null ? null : (min == null ? (value != null && value! > max ? 'high' : 'ok') : rangeState(value, min, max));
+    double? display(double? v) => f.tempValue(v, unit);
+    final symbol = f.unitSymbol(unit);
+    final expected = isTemp
+        ? (min == null || max == null ? null : f.tempRange(min, max, unit))
+        : (max == null ? null : 'até ${f.temp(max, unit, digits: 1)}');
     final outside = state == 'high' || state == 'low';
     final valueColor = stale
         ? context.colors.muted
@@ -98,7 +108,8 @@ class ReadingTile extends StatelessWidget {
 
     return Semantics(
       container: true,
-      label: '$label: ${f.number(display(value))} $symbol.${expected == null ? '' : ' Esperado: $expected.'}',
+      label: '$label: ${f.number(display(value))} $symbol${isTemp ? '' : ' de bulbo úmido, umidade relativa ${f.humidity(relativeHumidity, digits: 0)}'}.'
+          '${expected == null ? '' : ' Esperado: $expected.'}',
       child: ExcludeSemantics(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -121,15 +132,22 @@ class ReadingTile extends StatelessWidget {
               const SizedBox(height: 6),
             ] else
               const SizedBox(height: 2),
+            if (!isTemp)
+              Text(
+                'Bulbo úmido estimado · UR ${f.humidity(relativeHumidity, digits: 0)}',
+                style: TextStyle(fontSize: 12.5, color: context.colors.textSecondary),
+              ),
             if (target != null)
               Text(
                 'Alvo ${f.temp(target, unit)}',
                 style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: context.scheme.primary),
               ),
-            Text(
-              expected == null ? 'Sem fase em andamento' : 'Esperado $expected',
-              style: TextStyle(fontSize: 12.5, color: outside && !stale ? context.colors.crit : context.colors.muted),
-            ),
+            // Fase sem teto do bulbo úmido (Amarelação, Secagem do talo): nada a comparar na umidade.
+            if (expected != null || range == null)
+              Text(
+                expected == null ? 'Sem fase em andamento' : 'Esperado $expected',
+                style: TextStyle(fontSize: 12.5, color: outside && !stale ? context.colors.crit : context.colors.muted),
+              ),
           ],
         ),
       ),

@@ -2,6 +2,8 @@
 
 import math
 
+from core.config import settings
+
 _WATER_AIR_RATIO = 0.621945
 
 
@@ -44,3 +46,8 @@ def wet_bulb(dry_bulb: float, relative_humidity: float, pressure_kpa: float) -> 
         else:
             low = middle
     return (low + high) / 2
+
+
+def estimate_wet_bulb(temperature: float, humidity: float) -> float:
+    """Bulbo úmido estimado (°C) de uma leitura do SHT40, na pressão atmosférica configurada para a estufa."""
+    return wet_bulb(temperature, humidity, settings.ATMOSPHERIC_PRESSURE_KPA)

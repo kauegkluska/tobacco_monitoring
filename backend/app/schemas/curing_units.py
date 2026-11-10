@@ -46,6 +46,8 @@ class PhaseStatus(BaseModel):
     temp_max: float
     humidity_min: float
     humidity_max: float
+    # Bulbo úmido (°C) em que a fase avisa "Umidade alta"; nulo na Amarelação e na Secagem do talo.
+    wet_bulb_max: float | None = None
     min_hours: float
     max_hours: float
     hours: float

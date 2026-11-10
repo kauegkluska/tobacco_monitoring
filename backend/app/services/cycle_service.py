@@ -2,7 +2,6 @@
 
 from datetime import datetime
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from core.clock import utcnow
@@ -11,6 +10,7 @@ from models.curing_cycle import CuringCycle
 from models.curing_unit import CuringUnit
 from models.reading import Reading
 from services.phases import PHASES, phase_named
+from services.reading_stats import reading_stats
 
 IN_PROGRESS = "in_progress"
 FINISHED = "finished"
@@ -86,24 +86,7 @@ def phase_hours(unit: CuringUnit, cycle: CuringCycle, now: datetime) -> list[dic
 
 
 def _stats(db: Session, unit: CuringUnit, start: datetime, end: datetime) -> dict:
-    row = db.query(
-        func.count(Reading.id),
-        func.min(Reading.temperature),
-        func.avg(Reading.temperature),
-        func.max(Reading.temperature),
-        func.min(Reading.humidity),
-        func.avg(Reading.humidity),
-        func.max(Reading.humidity),
-        func.min(Reading.timestamp),
-        func.max(Reading.timestamp),
-    ).filter(Reading.curing_unit_id == unit.id, Reading.timestamp >= start, Reading.timestamp <= end).one()
-    return dict(zip(
-        (
-            "count", "temperature_min", "temperature_avg", "temperature_max",
-            "humidity_min", "humidity_avg", "humidity_max", "first_at", "last_at",
-        ),
-        row,
-    ))
+    return reading_stats(db, Reading.curing_unit_id == unit.id, Reading.timestamp >= start, Reading.timestamp <= end)
 
 
 def cycle_alerts(db: Session, cycle: CuringCycle, now: datetime | None = None):

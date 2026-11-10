@@ -24,15 +24,18 @@ export function limitsFor(unit, device) {
   return unit?.phase ? { ...unit.phase } : limitsOf(device);
 }
 
-/** Fases do período (resposta de /series) no formato do gráfico, já na unidade de exibição. */
+/**
+ * Fases do período (resposta de /series) no formato do gráfico, já na unidade de exibição. A umidade é mostrada como
+ * bulbo úmido, que não tem faixa por fase: aí só a cor de fundo da fase aparece.
+ */
 export function chartPhases(series, isTemp) {
   return (series?.phases || []).map((phase) => ({
     start: new Date(phase.started_at),
     end: new Date(phase.ended_at),
     key: phase.key,
     name: phase.stage,
-    min: isTemp ? f.tempValue(phase.temp_min) : phase.humidity_min,
-    max: isTemp ? f.tempValue(phase.temp_max) : phase.humidity_max,
+    min: isTemp ? f.tempValue(phase.temp_min) : null,
+    max: isTemp ? f.tempValue(phase.temp_max) : null,
   }));
 }
 

@@ -275,7 +275,15 @@ class _UnitCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 16),
                   Expanded(
-                    child: ReadingTile(metric: Metric.humidity, value: latest?.humidity, limits: limits, unit: tempUnit, stale: stale, compact: true),
+                    child: ReadingTile(
+                      metric: Metric.humidity,
+                      value: latest?.wetBulb,
+                      relativeHumidity: latest?.humidity,
+                      limits: limits,
+                      unit: tempUnit,
+                      stale: stale,
+                      compact: true,
+                    ),
                   ),
                 ],
               ),

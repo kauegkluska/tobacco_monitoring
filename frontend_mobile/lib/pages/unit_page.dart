@@ -457,7 +457,16 @@ class _UnitPageState extends State<UnitPage> {
                   ),
                 ),
                 const SizedBox(width: 20),
-                Expanded(child: ReadingTile(metric: Metric.humidity, value: latest?.humidity, limits: expected, unit: prefs.unit, stale: stale)),
+                Expanded(
+                  child: ReadingTile(
+                    metric: Metric.humidity,
+                    value: latest?.wetBulb,
+                    relativeHumidity: latest?.humidity,
+                    limits: expected,
+                    unit: prefs.unit,
+                    stale: stale,
+                  ),
+                ),
               ],
             ),
             if (caption != null) ...[

@@ -364,7 +364,8 @@ class _CycleDetailPageState extends State<CycleDetailPage> {
           children: [
             DetailGrid(items: [
               DetailItem(label: 'Temperatura mín. / méd. / máx.', value: _range(stats.temperatureMin, stats.temperatureAvg, stats.temperatureMax, (v) => f.temp(v, unitPref, digits: 0))),
-              DetailItem(label: 'Umidade mín. / méd. / máx.', value: _range(stats.humidityMin, stats.humidityAvg, stats.humidityMax, (v) => f.humidity(v, digits: 0))),
+              DetailItem(label: 'Umidade (bulbo úmido) mín. / méd. / máx.', value: _range(stats.wetBulbMin, stats.wetBulbAvg, stats.wetBulbMax, (v) => f.temp(v, unitPref, digits: 0))),
+              DetailItem(label: 'Umidade relativa mín. / méd. / máx.', value: _range(stats.humidityMin, stats.humidityAvg, stats.humidityMax, (v) => f.humidity(v, digits: 0))),
             ]),
             const SizedBox(height: 14),
             SegmentedButton<bool>(
@@ -423,16 +424,18 @@ class _CycleDetailPageState extends State<CycleDetailPage> {
     final data = series;
     if (data == null) return const SizedBox(height: 220, child: Center(child: CircularProgressIndicator()));
     final unitPref = prefs.unit;
-    double convert(double value) => temperature ? f.tempValue(value, unitPref)! : value;
-    String format(double value) => temperature ? '${f.number(value)} ${f.unitSymbol(unitPref)}' : '${f.number(value)}%';
+    // Umidade em bulbo úmido estimado: também uma temperatura.
+    double convert(double value) => f.tempValue(value, unitPref)!;
+    String format(double value) => '${f.number(value)} ${f.unitSymbol(unitPref)}';
     final phases = chartPhasesOf(data, context.colors, temperature: temperature, unit: unitPref);
     final points = [
       for (final point in data.points)
+        if (temperature || !point.wetBulb.isNaN)
         ChartPoint(
           point.time,
-          convert(temperature ? point.temperature : point.humidity),
-          low: convert(temperature ? point.temperatureMin : point.humidityMin),
-          high: convert(temperature ? point.temperatureMax : point.humidityMax),
+          convert(temperature ? point.temperature : point.wetBulb),
+          low: convert(temperature ? point.temperatureMin : point.wetBulbMin),
+          high: convert(temperature ? point.temperatureMax : point.wetBulbMax),
           count: point.count,
         ),
     ];
@@ -448,7 +451,7 @@ class _CycleDetailPageState extends State<CycleDetailPage> {
           detail: (point) => point.count > 1 ? '${format(point.low!)} a ${format(point.high!)}' : '1 leitura',
           gap: Duration(seconds: (data.bucketSeconds * 3).clamp(300, 1 << 30)),
           height: 220,
-          semanticLabel: '${temperature ? 'Temperatura' : 'Umidade'} durante a secagem',
+          semanticLabel: '${temperature ? 'Temperatura' : 'Umidade (bulbo úmido estimado)'} durante a secagem',
           emptyText: 'Sem leituras nesta secagem.',
         ),
         if (phases.length > 1) PhaseLegend(phases: phases),

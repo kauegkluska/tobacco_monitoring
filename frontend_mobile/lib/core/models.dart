@@ -56,6 +56,7 @@ class PhaseStatus {
           tempMax: _double(json['temp_max'])!,
           humidityMin: _double(json['humidity_min'])!,
           humidityMax: _double(json['humidity_max'])!,
+          wetBulbMax: _double(json['wet_bulb_max']),
         ),
         minHours = _double(json['min_hours']) ?? 0,
         maxHours = _double(json['max_hours']) ?? 0,
@@ -152,7 +153,7 @@ class CuringUnit {
 }
 
 class Limits {
-  const Limits({required this.tempMin, required this.tempMax, required this.humidityMin, required this.humidityMax});
+  const Limits({required this.tempMin, required this.tempMax, required this.humidityMin, required this.humidityMax, this.wetBulbMax});
 
   static const defaults = Limits(tempMin: 35, tempMax: 75, humidityMin: 40, humidityMax: 90);
 
@@ -160,6 +161,9 @@ class Limits {
   final double tempMax;
   final double humidityMin;
   final double humidityMax;
+
+  /// Bulbo úmido (°C) em que a fase avisa "Umidade alta"; nulo nas fases sem esse alerta.
+  final double? wetBulbMax;
 }
 
 class Device {
@@ -215,10 +219,16 @@ class Reading {
   Reading.fromJson(Map<String, dynamic> json)
       : temperature = _double(json['temperature'])!,
         humidity = _double(json['humidity'])!,
+        wetBulb = _double(json['wet_bulb']),
         timestamp = _date(json['timestamp']) ?? DateTime.now();
 
   final double temperature;
+
+  /// Umidade relativa (%), a que o sensor mede.
   final double humidity;
+
+  /// Bulbo úmido estimado (°C): a "umidade" que o produtor lê no termômetro molhado.
+  final double? wetBulb;
   final DateTime timestamp;
 }
 
@@ -282,6 +292,10 @@ class SeriesPoint {
         humidity = _double(json['humidity'])!,
         humidityMin = _double(json['humidity_min'])!,
         humidityMax = _double(json['humidity_max'])!,
+        // Servidor anterior ao bulbo úmido nos gráficos: a linha some em vez de quebrar a tela.
+        wetBulb = _double(json['wet_bulb']) ?? double.nan,
+        wetBulbMin = _double(json['wet_bulb_min']) ?? double.nan,
+        wetBulbMax = _double(json['wet_bulb_max']) ?? double.nan,
         count = json['count'] as int;
 
   final DateTime time;
@@ -291,6 +305,11 @@ class SeriesPoint {
   final double humidity;
   final double humidityMin;
   final double humidityMax;
+
+  /// Bulbo úmido estimado (°C) do intervalo.
+  final double wetBulb;
+  final double wetBulbMin;
+  final double wetBulbMax;
   final int count;
 }
 
@@ -303,6 +322,9 @@ class SeriesStats {
         humidityMin = _double(json['humidity_min']),
         humidityAvg = _double(json['humidity_avg']),
         humidityMax = _double(json['humidity_max']),
+        wetBulbMin = _double(json['wet_bulb_min']),
+        wetBulbAvg = _double(json['wet_bulb_avg']),
+        wetBulbMax = _double(json['wet_bulb_max']),
         lastAt = _date(json['last_at']);
 
   final int count;
@@ -312,6 +334,9 @@ class SeriesStats {
   final double? humidityMin;
   final double? humidityAvg;
   final double? humidityMax;
+  final double? wetBulbMin;
+  final double? wetBulbAvg;
+  final double? wetBulbMax;
   final DateTime? lastAt;
 }
 
