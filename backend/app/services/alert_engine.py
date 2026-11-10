@@ -38,6 +38,7 @@ from services.phases import (
     HEATING_TYPE,
     HUMIDITY_LOW_TYPE,
     MANUAL_FLAP_TYPE,
+    VERY_WET_DEPRESSION_C,
     VERY_WET_TYPE,
     WET_LOAD_TYPE,
     NO_READINGS_TYPE,
@@ -98,9 +99,8 @@ SENSOR_NORMAL_MINUTES = 10
 SATURATED_HUMIDITY = 99.0
 SATURATED_MINUTES = 30
 
-# A1 "Estufa muito úmida" na Amarelação: depressão do bulbo úmido para abrir e para encerrar, e por quanto tempo (DE;
-# o limiar fica dentro da incerteza da estimativa, C37 e C39).
-VERY_WET_DEPRESSION_C = 0.5
+# A1 "Estufa muito úmida" na Amarelação: depressão do bulbo úmido para encerrar e por quanto tempo; o limiar de
+# abertura (VERY_WET_DEPRESSION_C) fica em services/phases.py, junto da faixa exibida na tela (DE).
 VERY_WET_MINUTES = 30
 VERY_WET_CLEAR_C = 1.0
 VERY_WET_CLEAR_MINUTES = 10

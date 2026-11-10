@@ -46,8 +46,17 @@ class PhaseStatus(BaseModel):
     temp_max: float
     humidity_min: float
     humidity_max: float
-    # Bulbo úmido (°C) em que a fase avisa "Umidade alta"; nulo na Amarelação e na Secagem do talo.
+    # Referências do bulbo úmido (°C) para a tela, as mesmas do flap e dos alertas. Murchamento e Secagem da folha:
+    # alvo do flap e faixa de alvo − 2 °C até o teto de "Umidade alta". Nulos nas outras fases.
+    wet_bulb_target: float | None = None
+    wet_bulb_min: float | None = None
     wet_bulb_max: float | None = None
+    # Amarelação: diferença entre seco e úmido (°C). Abaixo do mínimo, "Estufa muito úmida"; acima do máximo, "Ar seco
+    # na Amarelação"; o ideal é a faixa dos guias de cura (2 a 3 °F).
+    depression_min: float | None = None
+    depression_ideal_min: float | None = None
+    depression_ideal_max: float | None = None
+    depression_max: float | None = None
     min_hours: float
     max_hours: float
     hours: float

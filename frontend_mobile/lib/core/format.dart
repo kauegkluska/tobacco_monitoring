@@ -35,6 +35,12 @@ String temp(double? celsius, TempUnit unit, {int digits = 1}) {
   return '${number(tempValue(celsius, unit), digits)} ${unitSymbol(unit)}';
 }
 
+/// Diferença de temperatura (°C na API): a conversão para °F só multiplica, sem somar 32.
+String tempDelta(double? celsius, TempUnit unit, {int digits = 1}) {
+  final value = celsius == null ? null : (unit == TempUnit.fahrenheit ? celsius * 9 / 5 : celsius);
+  return '${number(value, digits)} ${unitSymbol(unit)}';
+}
+
 /// Taxa de subida (°C/h na API): a conversão para °F só multiplica, sem somar 32.
 String rate(double? celsiusPerHour, TempUnit unit, {int digits = 1}) {
   final value = celsiusPerHour == null ? null : (unit == TempUnit.fahrenheit ? celsiusPerHour * 9 / 5 : celsiusPerHour);

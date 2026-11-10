@@ -84,6 +84,14 @@ def _temperature_high(warning: float, critical: float, minutes: int, emergency: 
     return Rule(TEMPERATURE_HIGH_TYPE, "temperature", "high", tiers)
 
 
+# Amarelação: diferença entre os bulbos seco e úmido. Ideal de 2 a 3 °F (1,1 a 1,7 °C, Virginia Tech); abaixo de 0,5 °C
+# abre "Estufa muito úmida" (DE, dentro da incerteza da estimativa: C37, C39) e acima de 4,4 °C, "Ar seco na Amarelação".
+YELLOWING_DEPRESSION_IDEAL_C = (1.1, 1.7)
+VERY_WET_DEPRESSION_C = 0.5
+DRY_AIR_DEPRESSION_C = 4.4
+# Bulbo úmido abaixo do alvo do flap a partir do qual o Murchamento avisa "Umidade baixa" (DE).
+WET_BULB_LOW_MARGIN_C = 2.0
+
 # O manual Powell mantém o úmido em até 41,1 °C; adotou-se 40,6 °C (105 °F) por NC State, Virginia Tech e a fonte
 # brasileira. Crítico a 43 °C: 2 °C abaixo dos ~45 °C em que a folha úmida morre, cobrindo a incerteza da estimativa.
 _WET_BULB_HIGH = Rule(WET_BULB_HIGH_TYPE, "wet_bulb", "high", (Tier(40.6, "warning", 2), Tier(43.0, "critical", 2)))
@@ -96,7 +104,7 @@ PHASES: tuple[Phase, ...] = (
         min_hours=48, max_hours=60,
         rules=(
             _temperature_high(40, 42, 10),
-            Rule(DEPRESSION_HIGH_TYPE, "depression", "high", (Tier(4.4, "warning", 15),)),
+            Rule(DEPRESSION_HIGH_TYPE, "depression", "high", (Tier(DRY_AIR_DEPRESSION_C, "warning", 15),)),
         ),
         heating_limit=1.1,
         advance_temp_at_least=38, advance_temp_minutes=10,
@@ -114,7 +122,7 @@ PHASES: tuple[Phase, ...] = (
             _temperature_high(47.8, 52, 2),
             _WET_BULB_HIGH,
             # Bulbo úmido 2 °C abaixo do alvo do flap por 15 min (DE).
-            Rule(HUMIDITY_LOW_TYPE, "wet_bulb_deficit", "high", (Tier(2.0, "info", 15),)),
+            Rule(HUMIDITY_LOW_TYPE, "wet_bulb_deficit", "high", (Tier(WET_BULB_LOW_MARGIN_C, "info", 15),)),
         ),
         heating_limit=0.8,
         advance_temp_at_least=46, advance_temp_minutes=10,

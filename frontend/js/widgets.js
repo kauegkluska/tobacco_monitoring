@@ -99,24 +99,45 @@ export function phaseSteps(current, finished) {
  * Sem `limits` (nenhuma fase em andamento) não há faixa a mostrar.
  *
  * A umidade aparece como bulbo úmido estimado (`value` em °C), como no termômetro molhado da estufa e nos guias de
- * cura; a umidade relativa medida pelo sensor (`relativeHumidity`) fica na linha de baixo. Ela só tem teto, e só nas
- * fases com o alerta "Umidade alta".
+ * cura; a umidade relativa medida pelo sensor (`relativeHumidity`) fica na linha de baixo. A régua da umidade usa as
+ * referências que guiam o flap e os alertas, com uma linha dizendo por quê: na Amarelação, a diferença entre seco e
+ * úmido (a faixa acompanha `dryBulb`, a temperatura da mesma leitura); no Murchamento e na Secagem da folha, do alvo do
+ * flap − 2 °C até o teto de "Umidade alta". A Secagem do talo não tem régua de umidade.
  */
-export function reading({ metric, value, limits, stale, compact = false, target = null, relativeHumidity = null }) {
+export function reading({ metric, value, limits, stale, compact = false, target = null, relativeHumidity = null, dryBulb = null }) {
   const isTemp = metric === "temperature";
-  const min = limits && isTemp ? limits.temp_min : null;
-  const max = limits ? (isTemp ? limits.temp_max : limits.wet_bulb_max ?? null) : null;
-  const hasValue = value !== null && value !== undefined;
-  const state = max === null ? null : min === null ? (hasValue && value > max ? "high" : "ok") : rangeState(value, min, max);
+  const has = (v) => v !== null && v !== undefined;
+  let min = null;
+  let max = null;
+  // Linha da faixa e, na umidade, o porquê dela.
+  let expected = null;
+  let why = null;
+  if (isTemp) {
+    if (limits) {
+      [min, max] = [limits.temp_min, limits.temp_max];
+      expected = `Esperado ${f.tempRange(min, max)}`;
+    }
+  } else if (limits && has(limits.depression_min) && has(limits.depression_max)) {
+    if (has(dryBulb)) [min, max] = [dryBulb - limits.depression_max, dryBulb - limits.depression_min];
+    const difference = has(dryBulb) && has(value) ? dryBulb - value : null;
+    const idealMin = f.tempDelta(limits.depression_ideal_min).split(" ")[0];
+    expected = `Seco − úmido ${f.tempDelta(difference)} · ideal ${idealMin} a ${f.tempDelta(limits.depression_ideal_max)}`;
+    why = "Úmido perto do seco: a folha amarela sem secar.";
+  } else if (limits && has(limits.wet_bulb_max)) {
+    [min, max] = [limits.wet_bulb_min ?? null, limits.wet_bulb_max];
+    expected = min === null ? `Esperado até ${f.temp(max)}` : `Esperado ${f.number(f.tempValue(min))} a ${f.temp(max)}`;
+    why = `Acima de ${f.temp(max)}, risco de escaldadura.`;
+  }
+  const state = max === null ? null : min === null ? (has(value) && value > max ? "high" : "ok") : rangeState(value, min, max);
   const outside = !stale && (state === "high" || state === "low");
   const show = (v) => f.tempValue(v);
   const symbol = f.tempUnit();
-  const expected = max === null ? null : isTemp ? f.tempRange(min, max) : `até ${f.temp(max)}`;
   const label = isTemp ? "Temperatura" : "Umidade";
   const relative = isTemp ? null : `Bulbo úmido estimado · UR ${f.humidity(relativeHumidity, 0)}`;
+  const shownTarget = isTemp ? target : limits?.wet_bulb_target ?? null;
 
   let meter = null;
-  if (!compact && isTemp && limits) {
+  if (!compact && min !== null && max !== null) {
     // Régua: faixa esperada destacada e marcador no valor atual.
     const lo = show(min);
     const hi = show(max);
@@ -137,7 +158,7 @@ export function reading({ metric, value, limits, stale, compact = false, target 
     {
       class: `reading ${compact ? "is-compact" : ""} ${stale ? "is-stale" : ""} ${outside ? "is-out" : ""}`,
       role: "group",
-      "aria-label": `${label}: ${f.number(show(value))} ${symbol}${relative ? ` (${relative})` : ""}.${expected ? ` Esperado: ${expected}.` : ""}`,
+      "aria-label": `${label}: ${f.number(show(value))} ${symbol}${relative ? ` (${relative})` : ""}.${expected ? ` ${expected}.` : ""}${why ? ` ${why}` : ""}`,
     },
     h(
       "p",
@@ -149,9 +170,10 @@ export function reading({ metric, value, limits, stale, compact = false, target 
     h("p", { class: "reading-value" }, h("span", { class: "reading-number num" }, f.number(show(value))), h("span", { class: "reading-unit" }, symbol)),
     meter,
     relative ? h("p", { class: "reading-expected" }, relative) : null,
-    target !== null && target !== undefined ? h("p", { class: "reading-target" }, `Alvo ${f.temp(target)}`) : null,
-    // Fase sem teto do bulbo úmido (Amarelação, Secagem do talo): nada a comparar na umidade.
-    expected || !limits ? h("p", { class: "reading-expected" }, expected ? `Esperado ${expected}` : "Sem fase em andamento") : null,
+    has(shownTarget) ? h("p", { class: "reading-target" }, `Alvo ${f.temp(shownTarget)}`) : null,
+    // Secagem do talo: nada a comparar na umidade.
+    expected || !limits ? h("p", { class: "reading-expected" }, expected ?? "Sem fase em andamento") : null,
+    why && !compact ? h("p", { class: "reading-expected" }, why) : null,
   );
 }
 

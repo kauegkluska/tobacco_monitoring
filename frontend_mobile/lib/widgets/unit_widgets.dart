@@ -26,7 +26,10 @@ enum Metric { temperature, humidity }
 /// Valor grande de temperatura ou umidade, com a faixa esperada da fase.
 ///
 /// A umidade aparece como bulbo úmido estimado, em graus, como no termômetro molhado da estufa e nos guias de cura;
-/// a umidade relativa medida pelo sensor fica na linha de baixo.
+/// a umidade relativa medida pelo sensor fica na linha de baixo. A régua da umidade usa as referências que guiam o flap
+/// e os alertas, com uma linha dizendo por quê: na Amarelação, a diferença entre seco e úmido (a faixa acompanha a
+/// temperatura); no Murchamento e na Secagem da folha, do alvo do flap − 2 °C até o teto de "Umidade alta". A Secagem
+/// do talo não tem régua de umidade.
 class ReadingTile extends StatelessWidget {
   const ReadingTile({
     required this.metric,
@@ -37,6 +40,7 @@ class ReadingTile extends StatelessWidget {
     this.compact = false,
     this.target,
     this.relativeHumidity,
+    this.dryBulb,
     super.key,
   });
 
@@ -47,6 +51,9 @@ class ReadingTile extends StatelessWidget {
 
   /// Umidade relativa (%) da mesma leitura, mostrada abaixo do bulbo úmido.
   final double? relativeHumidity;
+
+  /// Temperatura do ar (°C) da mesma leitura: na Amarelação a faixa do úmido é medida a partir dela.
+  final double? dryBulb;
 
   /// Faixa da fase em andamento; nula sem fase (nada a comparar).
   final Limits? limits;
@@ -63,15 +70,39 @@ class ReadingTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final isTemp = metric == Metric.temperature;
     final range = limits;
-    // Temperatura: faixa da fase. Umidade: só o teto do bulbo úmido, nas fases que têm o alerta "Umidade alta".
-    final min = range == null || !isTemp ? null : range.tempMin;
-    final max = range == null ? null : (isTemp ? range.tempMax : range.wetBulbMax);
+    double? min;
+    double? max;
+    // Linha da faixa e, na umidade, o porquê dela.
+    String? expected;
+    String? why;
+    if (isTemp) {
+      min = range?.tempMin;
+      max = range?.tempMax;
+      if (min != null && max != null) expected = 'Esperado ${f.tempRange(min, max, unit)}';
+    } else if (range != null) {
+      final (dMin, dMax) = (range.depressionMin, range.depressionMax);
+      if (dMin != null && dMax != null) {
+        final dry = dryBulb;
+        if (dry != null) (min, max) = (dry - dMax, dry - dMin);
+        final difference = dry == null || value == null ? null : dry - value!;
+        final idealMin = range.depressionIdealMin;
+        final ideal = '${f.number(idealMin == null ? null : (unit == TempUnit.fahrenheit ? idealMin * 9 / 5 : idealMin))} a '
+            '${f.tempDelta(range.depressionIdealMax, unit)}';
+        expected = 'Seco − úmido ${f.tempDelta(difference, unit)} · ideal $ideal';
+        why = 'Úmido perto do seco: a folha amarela sem secar.';
+      } else if (range.wetBulbMax != null) {
+        min = range.wetBulbMin;
+        max = range.wetBulbMax;
+        expected = min == null
+            ? 'Esperado até ${f.temp(max, unit)}'
+            : 'Esperado ${f.number(f.tempValue(min, unit))} a ${f.temp(max, unit)}';
+        why = 'Acima de ${f.temp(max, unit)}, risco de escaldadura.';
+      }
+    }
     final state = max == null ? null : (min == null ? (value != null && value! > max ? 'high' : 'ok') : rangeState(value, min, max));
     double? display(double? v) => f.tempValue(v, unit);
     final symbol = f.unitSymbol(unit);
-    final expected = isTemp
-        ? (min == null || max == null ? null : f.tempRange(min, max, unit))
-        : (max == null ? null : 'até ${f.temp(max, unit, digits: 1)}');
+    final shownTarget = isTemp ? target : range?.wetBulbTarget;
     final outside = state == 'high' || state == 'low';
     final valueColor = stale
         ? context.colors.muted
@@ -109,7 +140,7 @@ class ReadingTile extends StatelessWidget {
     return Semantics(
       container: true,
       label: '$label: ${f.number(display(value))} $symbol${isTemp ? '' : ' de bulbo úmido, umidade relativa ${f.humidity(relativeHumidity, digits: 0)}'}.'
-          '${expected == null ? '' : ' Esperado: $expected.'}',
+          '${expected == null ? '' : ' $expected.'}${why == null ? '' : ' $why'}',
       child: ExcludeSemantics(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -137,17 +168,19 @@ class ReadingTile extends StatelessWidget {
                 'Bulbo úmido estimado · UR ${f.humidity(relativeHumidity, digits: 0)}',
                 style: TextStyle(fontSize: 12.5, color: context.colors.textSecondary),
               ),
-            if (target != null)
+            if (shownTarget != null)
               Text(
-                'Alvo ${f.temp(target, unit)}',
+                'Alvo ${f.temp(shownTarget, unit)}',
                 style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: context.scheme.primary),
               ),
-            // Fase sem teto do bulbo úmido (Amarelação, Secagem do talo): nada a comparar na umidade.
+            // Secagem do talo: nada a comparar na umidade.
             if (expected != null || range == null)
               Text(
-                expected == null ? 'Sem fase em andamento' : 'Esperado $expected',
+                expected ?? 'Sem fase em andamento',
                 style: TextStyle(fontSize: 12.5, color: outside && !stale ? context.colors.crit : context.colors.muted),
               ),
+            if (why != null && !compact)
+              Text(why, style: TextStyle(fontSize: 12.5, color: context.colors.muted)),
           ],
         ),
       ),

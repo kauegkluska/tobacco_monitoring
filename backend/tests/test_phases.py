@@ -240,3 +240,24 @@ def test_finished_unit_always_starts_a_new_batch(client, auth, drying_unit):
     started = client.post(f"/curing_units/{unit_id}/start-drying", headers=auth).json()
     assert started["curing_stage"] == "Amarelação"
     assert started["cycle_hours"] < 0.1
+
+
+def test_phase_shows_the_wet_bulb_references_of_the_flap_and_alerts(client, auth, drying_unit):
+    unit_id = drying_unit["unit"]["id"]
+    yellowing = client.get(f"/curing_units/{unit_id}", headers=auth).json()["phase"]
+    # Amarelação: faixa pela diferença entre seco e úmido, com o ideal dos guias (2 a 3 °F).
+    assert (yellowing["depression_min"], yellowing["depression_max"]) == (0.5, 4.4)
+    assert (yellowing["depression_ideal_min"], yellowing["depression_ideal_max"]) == (1.1, 1.7)
+    assert yellowing["wet_bulb_target"] is None
+
+    set_stage(client, auth, unit_id, "Murchamento")
+    send_reading(client, temperature=45.5, humidity=50.0)
+    wilting = client.get(f"/curing_units/{unit_id}", headers=auth).json()["phase"]
+    # O alvo do Murchamento acompanha o bulbo seco: 39 °C no meio da reta de 43 a 48 °C.
+    assert wilting["wet_bulb_target"] == pytest.approx(39.0)
+    assert wilting["wet_bulb_min"] == pytest.approx(37.0)
+    assert wilting["wet_bulb_max"] == 40.6
+    assert wilting["depression_max"] is None
+
+    stem = set_stage(client, auth, unit_id, "Secagem do talo")["phase"]
+    assert (stem["wet_bulb_target"], stem["wet_bulb_min"], stem["wet_bulb_max"]) == (None, None, None)

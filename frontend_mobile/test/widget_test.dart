@@ -36,6 +36,53 @@ Widget _wrap(Widget child, {ApiClient? api}) {
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
+  group('umidade como bulbo úmido', () {
+    Widget tile(Limits limits, {required double wetBulb, double dryBulb = 37.0}) => Scaffold(
+          body: ReadingTile(
+            metric: Metric.humidity,
+            value: wetBulb,
+            relativeHumidity: 88,
+            dryBulb: dryBulb,
+            limits: limits,
+            unit: TempUnit.celsius,
+          ),
+        );
+
+    testWidgets('na Amarelação a régua é a diferença entre seco e úmido, com o porquê', (tester) async {
+      const yellowing = Limits(
+        tempMin: 35, tempMax: 40, humidityMin: 80, humidityMax: 95,
+        depressionMin: 0.5, depressionIdealMin: 1.1, depressionIdealMax: 1.7, depressionMax: 4.4,
+      );
+      await tester.pumpWidget(_wrap(tile(yellowing, wetBulb: 35.6)));
+      expect(find.text('Seco − úmido 1,4 °C · ideal 1,1 a 1,7 °C'), findsOneWidget);
+      expect(find.text('Úmido perto do seco: a folha amarela sem secar.'), findsOneWidget);
+      expect(find.byType(RangeMeter), findsOneWidget);
+
+      // Ar seco demais: 5 °C de diferença passa do limite de 4,4 °C.
+      await tester.pumpWidget(_wrap(tile(yellowing, wetBulb: 32.0)));
+      expect(find.byIcon(Icons.arrow_downward), findsOneWidget);
+    });
+
+    testWidgets('no Murchamento a régua vai do alvo − 2 °C ao teto, com o alvo do flap', (tester) async {
+      const wilting = Limits(
+        tempMin: 40, tempMax: 48, humidityMin: 65, humidityMax: 85,
+        wetBulbTarget: 39, wetBulbMin: 37, wetBulbMax: 40.6,
+      );
+      await tester.pumpWidget(_wrap(tile(wilting, wetBulb: 39.2, dryBulb: 45.5)));
+      expect(find.text('Alvo 39,0 °C'), findsOneWidget);
+      expect(find.text('Esperado 37,0 a 40,6 °C'), findsOneWidget);
+      expect(find.text('Acima de 40,6 °C, risco de escaldadura.'), findsOneWidget);
+      expect(find.byType(RangeMeter), findsOneWidget);
+    });
+
+    testWidgets('na Secagem do talo a umidade não tem régua', (tester) async {
+      const stem = Limits(tempMin: 60, tempMax: 74, humidityMin: 15, humidityMax: 40);
+      await tester.pumpWidget(_wrap(tile(stem, wetBulb: 34.0, dryBulb: 65.0)));
+      expect(find.byType(RangeMeter), findsNothing);
+      expect(find.text('Bulbo úmido estimado · UR 88%'), findsOneWidget);
+    });
+  });
+
   group('formatação', () {
     test('números e temperaturas em português', () {
       expect(f.number(98.64), '98,6');

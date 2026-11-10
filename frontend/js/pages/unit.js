@@ -132,7 +132,7 @@ export function renderUnit(ctx) {
         "section",
         { class: "card readings" },
         reading({ metric: "temperature", value: latest?.temperature, limits: unit.phase ? limits : null, stale, target: fanTarget(data.outputs) }),
-        reading({ metric: "humidity", value: latest?.wet_bulb, relativeHumidity: latest?.humidity, limits: unit.phase ? limits : null, stale }),
+        reading({ metric: "humidity", value: latest?.wet_bulb, relativeHumidity: latest?.humidity, dryBulb: latest?.temperature, limits: unit.phase ? limits : null, stale }),
       ),
       others.length ? h("div", { class: "grid grid-3" }, others.map((alert) => alertCard(alert, { showUnit: false, onChange: reload }))) : null,
       h(

@@ -279,6 +279,7 @@ class _UnitCard extends StatelessWidget {
                       metric: Metric.humidity,
                       value: latest?.wetBulb,
                       relativeHumidity: latest?.humidity,
+                      dryBulb: latest?.temperature,
                       limits: limits,
                       unit: tempUnit,
                       stale: stale,

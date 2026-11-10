@@ -56,7 +56,13 @@ class PhaseStatus {
           tempMax: _double(json['temp_max'])!,
           humidityMin: _double(json['humidity_min'])!,
           humidityMax: _double(json['humidity_max'])!,
+          wetBulbTarget: _double(json['wet_bulb_target']),
+          wetBulbMin: _double(json['wet_bulb_min']),
           wetBulbMax: _double(json['wet_bulb_max']),
+          depressionMin: _double(json['depression_min']),
+          depressionIdealMin: _double(json['depression_ideal_min']),
+          depressionIdealMax: _double(json['depression_ideal_max']),
+          depressionMax: _double(json['depression_max']),
         ),
         minHours = _double(json['min_hours']) ?? 0,
         maxHours = _double(json['max_hours']) ?? 0,
@@ -153,7 +159,19 @@ class CuringUnit {
 }
 
 class Limits {
-  const Limits({required this.tempMin, required this.tempMax, required this.humidityMin, required this.humidityMax, this.wetBulbMax});
+  const Limits({
+    required this.tempMin,
+    required this.tempMax,
+    required this.humidityMin,
+    required this.humidityMax,
+    this.wetBulbTarget,
+    this.wetBulbMin,
+    this.wetBulbMax,
+    this.depressionMin,
+    this.depressionIdealMin,
+    this.depressionIdealMax,
+    this.depressionMax,
+  });
 
   static const defaults = Limits(tempMin: 35, tempMax: 75, humidityMin: 40, humidityMax: 90);
 
@@ -162,8 +180,18 @@ class Limits {
   final double humidityMin;
   final double humidityMax;
 
-  /// Bulbo úmido (°C) em que a fase avisa "Umidade alta"; nulo nas fases sem esse alerta.
+  /// Referências do bulbo úmido (°C), as mesmas do flap e dos alertas. Murchamento e Secagem da folha: alvo do flap e
+  /// faixa do alvo − 2 °C até o teto de "Umidade alta". Nulas nas outras fases.
+  final double? wetBulbTarget;
+  final double? wetBulbMin;
   final double? wetBulbMax;
+
+  /// Amarelação: diferença entre seco e úmido (°C). Abaixo do mínimo, "Estufa muito úmida"; acima do máximo, "Ar seco
+  /// na Amarelação"; o ideal é a faixa dos guias de cura (2 a 3 °F).
+  final double? depressionMin;
+  final double? depressionIdealMin;
+  final double? depressionIdealMax;
+  final double? depressionMax;
 }
 
 class Device {

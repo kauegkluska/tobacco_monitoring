@@ -9,7 +9,19 @@ from core.clock import utcnow
 from models.curing_unit import CuringUnit
 from models.reading import Reading
 from models.stage_change import StageChange
-from services.phases import PHASES, current_phase, next_stage, phase_index, wet_bulb_limit
+from services.phases import (
+    DRY_AIR_DEPRESSION_C,
+    PHASES,
+    VERY_WET_DEPRESSION_C,
+    WET_BULB_LOW_MARGIN_C,
+    YELLOWING_DEPRESSION_IDEAL_C,
+    Phase,
+    current_phase,
+    flap_setting,
+    next_stage,
+    phase_index,
+    wet_bulb_limit,
+)
 
 
 def _open_segment(unit: CuringUnit) -> StageChange | None:
@@ -80,6 +92,41 @@ def _average(db: Session, unit: CuringUnit, column, since: datetime, until: date
     )
 
 
+def _wet_bulb_guide(db: Session | None, unit: CuringUnit, phase: Phase, hours: float) -> dict:
+    """Referências do bulbo úmido para a tela: as mesmas que guiam o flap e os alertas.
+
+    Amarelação: diferença entre seco e úmido (a faixa acompanha a temperatura). Murchamento e Secagem da folha: do alvo
+    do flap menos 2 °C até o teto do alerta "Umidade alta". Secagem do talo: nenhuma, o úmido cai sozinho com a folha seca.
+    """
+    guide = dict.fromkeys((
+        "wet_bulb_target", "wet_bulb_min", "depression_min", "depression_ideal_min", "depression_ideal_max",
+        "depression_max",
+    ))
+    guide["wet_bulb_max"] = wet_bulb_limit(phase)
+    if phase.key == "amarelacao":
+        guide.update(
+            depression_min=VERY_WET_DEPRESSION_C,
+            depression_ideal_min=YELLOWING_DEPRESSION_IDEAL_C[0],
+            depression_ideal_max=YELLOWING_DEPRESSION_IDEAL_C[1],
+            depression_max=DRY_AIR_DEPRESSION_C,
+        )
+        return guide
+    if guide["wet_bulb_max"] is None or db is None:
+        return guide
+    # O alvo do Murchamento acompanha o bulbo seco, como no controle do flap.
+    temperature = (
+        db.query(func.coalesce(Reading.filtered_temperature, Reading.temperature))
+        .filter(Reading.curing_unit_id == unit.id, Reading.is_outlier.is_(False))
+        .order_by(Reading.timestamp.desc(), Reading.id.desc())
+        .limit(1)
+        .scalar()
+    )
+    setting = flap_setting(phase, temperature, hours) if temperature is not None else None
+    if setting is not None and setting.setpoint is not None:
+        guide.update(wet_bulb_target=setting.setpoint, wet_bulb_min=setting.setpoint - WET_BULB_LOW_MARGIN_C)
+    return guide
+
+
 def phase_status(unit: CuringUnit, now: datetime | None = None) -> dict | None:
     """Fase atual, faixas de referência e o que falta para avançar."""
     phase = current_phase(unit)
@@ -121,7 +168,7 @@ def phase_status(unit: CuringUnit, now: datetime | None = None) -> dict | None:
         "temp_max": phase.temp_max,
         "humidity_min": phase.humidity_min,
         "humidity_max": phase.humidity_max,
-        "wet_bulb_max": wet_bulb_limit(phase),
+        **_wet_bulb_guide(db, unit, phase, hours),
         "min_hours": phase.min_hours,
         "max_hours": phase.max_hours,
         "hours": hours,

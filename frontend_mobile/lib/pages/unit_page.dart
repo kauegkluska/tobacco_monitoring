@@ -462,6 +462,7 @@ class _UnitPageState extends State<UnitPage> {
                     metric: Metric.humidity,
                     value: latest?.wetBulb,
                     relativeHumidity: latest?.humidity,
+                    dryBulb: latest?.temperature,
                     limits: expected,
                     unit: prefs.unit,
                     stale: stale,

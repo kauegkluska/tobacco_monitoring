@@ -34,6 +34,12 @@ export function temp(celsius, { digits = 1, unit = prefs.unit } = {}) {
 }
 
 /** Taxa de subida (°C/h na API): a conversão para °F só multiplica, sem somar 32. */
+/** Diferença de temperatura (°C na API): a conversão para °F só multiplica, sem somar 32. */
+export function tempDelta(celsius, { digits = 1, unit = prefs.unit } = {}) {
+  if (celsius === null || celsius === undefined) return `-- ${tempUnit(unit)}`;
+  return `${number(unit === "F" ? (celsius * 9) / 5 : celsius, digits)} ${tempUnit(unit)}`;
+}
+
 export function rate(celsiusPerHour, { digits = 1, unit = prefs.unit } = {}) {
   if (celsiusPerHour === null || celsiusPerHour === undefined) return `-- ${tempUnit(unit)}/h`;
   const value = unit === "F" ? (celsiusPerHour * 9) / 5 : celsiusPerHour;
