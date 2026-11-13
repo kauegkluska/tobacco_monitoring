@@ -17,6 +17,8 @@
     sender aplica nos reles. O estado real dos reles (R1/R2) volta para a API.
     GPIO5: aviso de 2 s quando a API pede ("aviso": true): saida ligada pelo app
     ou alerta de atencao ou mais grave. As saidas no automatico nao tocam.
+    Tambem bipa sozinho quando um sender para de mandar pacotes (ex.: falta de
+    energia na estufa), ja que sem leituras a API nao tem como pedir o aviso.
     =============================== */
 
     /* ===============================
@@ -46,11 +48,23 @@
     #define AVISO_PIN                5
     #define AVISO_NIVEL_ATIVO         HIGH  // Use LOW para modulo ativo em nivel baixo.
     #define AVISO_DURACAO_MS          2000UL
+    // Teste do buzzer: bipa 2 s ao ligar a placa, sem depender da API. Volte para false depois do teste.
+    #define TESTE_AVISO_AO_INICIAR    false
 
     constexpr uint8_t AVISO_NIVEL_INATIVO =
         (AVISO_NIVEL_ATIVO == HIGH) ? LOW : HIGH;
 
     static_assert(AVISO_DURACAO_MS > 0, "A duracao do aviso deve ser positiva.");
+
+    // SEM PACOTES DO SENDER: o gateway bipa sozinho, sem depender da API.
+    // Sem leituras nao ha resposta da API, entao o aviso da API nunca chegaria (ex.: falta de
+    // energia na estufa). Vale so para senders ja ouvidos desde que o gateway ligou.
+    // 5 min: o mesmo tempo em que a API abre o alerta critico "Sem novas leituras" na Amarelacao.
+    #define SEM_PACOTES_MS            300000UL
+    #define REPETIR_SEM_PACOTES_MS    300000UL
+    // Limite de bipes por silencio: se o sender foi desligado de proposito (fim da cura),
+    // o gateway nao fica bipando a noite toda. Volta a valer quando chega um pacote.
+    #define MAX_AVISOS_SEM_PACOTES    3
 
     // Estufa de destino na API. Use 0 para deixar a API escolher pela estufa vinculada ao controller_id.
     #define CURING_UNIT_ID 1
@@ -70,17 +84,9 @@
     #define INTERVALO_REDESCOBERTA    30000
     #define TEMPO_TESTE_API_MS        1500
 
-    // Igual a GATEWAY_API_KEY do backend/.env. Fica em segredos.h, fora do Git (veja segredos.exemplo.h):
-    //   #define SEGREDO_GATEWAY_API_KEY "sua-chave"
-    // Sem segredos.h, vale a chave informada no portal de configuracao.
-    #if __has_include("segredos.h")
-    #include "segredos.h"
-    #endif
-    #ifdef SEGREDO_GATEWAY_API_KEY
-    const char* GATEWAY_API_KEY = SEGREDO_GATEWAY_API_KEY;
-    #else
-    const char* GATEWAY_API_KEY = "";
-    #endif
+    // Igual a GATEWAY_API_KEY do backend (header X-API-Key). Tem prioridade sobre
+    // a chave do portal de configuracao; deixe vazio para usar a do portal.
+    const char* GATEWAY_API_KEY = "mlAnHGhYoYiZetUvLFOroGZ-6vsdgNQq";
 
     /* ===============================
     STATE
@@ -115,6 +121,9 @@
         long ultimo_numero;
         bool rele_umidade;
         bool rele_temperatura;
+        unsigned long ultimo_pacote_ms;
+        unsigned long ultimo_aviso_silencio_ms;
+        int avisos_silencio;
     };
 
     EstadoSender senders[MAX_SENDERS];
@@ -211,7 +220,7 @@
             return false;
         }
 
-        Serial.println("[AVISO] Pedido pela API: aviso por 2 s.");
+        Serial.println("[AVISO] Aviso por 2 s.");
         return true;
     }
 
@@ -229,7 +238,32 @@
         novo->ultimo_numero = -1;
         novo->rele_umidade = false;
         novo->rele_temperatura = false;
+        novo->ultimo_pacote_ms = millis();
+        novo->ultimo_aviso_silencio_ms = 0;
+        novo->avisos_silencio = 0;
         return novo;
+    }
+
+    // Chamado no loop: bipa quando um sender conhecido fica SEM_PACOTES_MS sem mandar pacote
+    // e repete a cada REPETIR_SEM_PACOTES_MS, ate MAX_AVISOS_SEM_PACOTES vezes.
+    void verificarSilencioSenders()
+    {
+        const unsigned long agora = millis();
+        for (int i = 0; i < quantidade_senders; i++)
+        {
+            EstadoSender* sender = &senders[i];
+            if (agora - sender->ultimo_pacote_ms < SEM_PACOTES_MS) continue;
+            if (sender->avisos_silencio >= MAX_AVISOS_SEM_PACOTES) continue;
+            if (sender->avisos_silencio > 0 &&
+                agora - sender->ultimo_aviso_silencio_ms < REPETIR_SEM_PACOTES_MS) continue;
+
+            sender->avisos_silencio++;
+            sender->ultimo_aviso_silencio_ms = agora;
+            Serial.printf("[AVISO] %s sem pacotes ha %lu min (aviso %d de %d).\n",
+                          sender->id, (agora - sender->ultimo_pacote_ms) / 60000UL,
+                          sender->avisos_silencio, MAX_AVISOS_SEM_PACOTES);
+            acionarAvisoSonoro();
+        }
     }
 
     void atualizarComandosRele(EstadoSender* sender, bool novaUmidade, bool novaTemperatura)
@@ -568,6 +602,7 @@
             // Saida ligada pelo app ou alerta novo: a API pede o aviso sonoro.
             if (extrairBooleanJSON(resposta, "\"aviso\"", false))
             {
+                Serial.println("[AVISO] Pedido pela API.");
                 acionarAvisoSonoro();
             }
 
@@ -673,6 +708,15 @@
         }
         sender->ultimo_numero = numero;
 
+        if (sender->avisos_silencio > 0)
+        {
+            Serial.print("[AVISO] ");
+            Serial.print(controller_id);
+            Serial.println(" voltou a mandar pacotes.");
+        }
+        sender->ultimo_pacote_ms = millis();
+        sender->avisos_silencio = 0;
+
         // 1) Responde logo com o ultimo comando de rele conhecido (nao espera a API)
         enviarDownlink(sender);
 
@@ -699,10 +743,15 @@
 
         Mcu.begin(HELTEC_BOARD, SLOW_CLK_TPYE);
 
-        // Inicializa desligado; nao toca ao ligar a placa nem a cada 10 segundos.
+        // Inicializa desligado; so toca ao ligar a placa com TESTE_AVISO_AO_INICIAR.
         if (!iniciarAvisoSonoro())
         {
             Serial.println("[AVISO] Desabilitado por falha de inicializacao.");
+        }
+        else if (TESTE_AVISO_AO_INICIAR)
+        {
+            Serial.println("[AVISO] Teste ao iniciar (TESTE_AVISO_AO_INICIAR).");
+            acionarAvisoSonoro();
         }
 
         pinMode(BOTAO_CONFIG_PIN, INPUT_PULLUP);
@@ -768,6 +817,7 @@
 
         manterWiFi();
         manterAPI();
+        verificarSilencioSenders();
         verificarBotaoConfig();
     }
 

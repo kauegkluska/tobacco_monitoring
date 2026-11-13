@@ -393,7 +393,7 @@ class _UnitPageState extends State<UnitPage> {
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 760),
           child: ListView.separated(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+            padding: listPadding(context, top: 4),
             itemCount: children.length,
             separatorBuilder: (_, __) => const SizedBox(height: 12),
             itemBuilder: (_, index) => children[index],

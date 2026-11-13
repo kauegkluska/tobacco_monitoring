@@ -230,7 +230,7 @@ class _VentilationPageState extends State<VentilationPage> {
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 760),
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+          padding: listPadding(context, top: 4),
           children: [
             row('humidity', data.humidity),
             const SizedBox(height: 12),

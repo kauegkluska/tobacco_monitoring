@@ -161,7 +161,7 @@ class _SettingsPageState extends State<SettingsPage> with WidgetsBindingObserver
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 760),
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            padding: listPadding(context, top: 8),
             children: [
               _noticesCard(),
               const SizedBox(height: 12),

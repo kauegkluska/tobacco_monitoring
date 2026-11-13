@@ -113,7 +113,7 @@ class _CyclesPageState extends State<CyclesPage> {
       builder: (context, _) => RefreshIndicator(
         onRefresh: _load,
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+          padding: listPadding(context, top: 8),
           children: [
             if (widget.unitId == null && units.length > 1) ...[
               DropdownButtonFormField<int?>(
@@ -405,7 +405,7 @@ class _CycleDetailPageState extends State<CycleDetailPage> {
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 760),
           child: ListView.separated(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+            padding: listPadding(context, top: 4),
             itemCount: children.length,
             separatorBuilder: (_, __) => const SizedBox(height: 12),
             itemBuilder: (_, index) => children[index],

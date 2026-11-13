@@ -40,7 +40,7 @@
 #define INTERVALO_TELA 3000
 
 // Identificador único deste controlador ESP32 (use este ID para vincular no app)
-#define CONTROLLER_ID          "ESP32-TOBACCO-01"
+#define CONTROLLER_ID          "ESP32-TOBACCO-02"
 #define HARDWARE_MODEL         "Heltec WiFi LoRa 32 V3"
 
 /* ===============================
@@ -63,6 +63,20 @@
 // Se o seu for assim, so trocar as duas linhas abaixo.
 #define RELE_LIGADO    HIGH
 #define RELE_DESLIGADO LOW
+
+/* ===============================
+   VISOR MONTADO DE CABECA PARA BAIXO
+   O LCD 20x4 (HD44780) nao tem comando de rotacao: as letras vem prontas da
+   memoria do chip. Com TELA_INVERTIDA = 1 o firmware desenha tudo girado em
+   180 graus: inverte linhas e colunas e troca cada letra por uma versao
+   desenhada de ponta-cabeca. O chip so guarda 8 desenhos proprios por vez
+   (2 ficam com os digitos grandes), por isso os rotulos ficam curtos
+   ("TEM"/"UMI"). Letras que ficam iguais giradas (I, N, O, S, H, %, -) usam
+   a fonte do proprio chip, e o "M" usa o "W" de cabeca para baixo.
+   Com o visor montado na posicao normal, troque para 0.
+   =============================== */
+
+#define TELA_INVERTIDA 1
 
 /* ===============================
    DEVICES AND STATE
@@ -101,16 +115,121 @@ void mostrarTemperatura(float temperatura);
 void mostrarUmidade(float umidade);
 
 /* ===============================
+   ESCRITA NO VISOR (NORMAL OU INVERTIDO)
+   Todas as posicoes sao dadas como o usuario ve a tela.
+   =============================== */
+
+#define LCD_COLUNAS 20
+#define LCD_LINHAS  4
+
+#if TELA_INVERTIDA
+#define TEXTO(normal, invertido) invertido
+#else
+#define TEXTO(normal, invertido) normal
+#endif
+
+// Slots 0 e 1 da memoria de desenhos ficam com os meios-blocos dos digitos
+// grandes; os slots 2 a 7 recebem as letras giradas de cada tela.
+#define PRIMEIRO_SLOT_LETRA 2
+
+// Letras na fonte 5x7 normal do chip; sao giradas ao carregar no visor.
+struct Glifo
+{
+    char letra;
+    byte linhas[7];
+};
+
+const Glifo fonteGirada[] = {
+    { 'T',    { 0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100 } },
+    { 'E',    { 0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b11111 } },
+    { 'F',    { 0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b10000 } },
+    { '\xDF', { 0b01100, 0b10010, 0b10010, 0b01100, 0b00000, 0b00000, 0b00000 } },  // grau
+    { 'U',    { 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110 } },
+    { '1',    { 0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110 } },
+    { '2',    { 0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111 } },
+    { 'C',    { 0b01110, 0b10001, 0b10000, 0b10000, 0b10000, 0b10001, 0b01110 } },
+    { 'A',    { 0b01110, 0b10001, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001 } },
+    { 'D',    { 0b11100, 0b10010, 0b10001, 0b10001, 0b10001, 0b10010, 0b11100 } },
+    { 'R',    { 0b11110, 0b10001, 0b10001, 0b11110, 0b10100, 0b10010, 0b10001 } },
+};
+
+char letraNoSlot[8];
+uint8_t proximoSlot = PRIMEIRO_SLOT_LETRA;
+
+byte espelhar5(byte b)
+{
+    byte r = 0;
+    for (int i = 0; i < 5; i++)
+    {
+        if (b & (1 << i)) r |= 1 << (4 - i);
+    }
+    return r;
+}
+
+// Codigo a escrever no LCD para mostrar 'c' de cabeca para baixo.
+// Carrega o desenho girado num slot livre na primeira vez que aparece na tela.
+uint8_t codigoGirado(char c)
+{
+    // Simetricas em 180 graus na fonte do chip (o ":" fica 1 pixel deslocado).
+    if (c != '\0' && strchr(" -:%HINOS", c)) return (uint8_t)c;
+    if (c == 'M') return 'W';
+
+    for (uint8_t s = PRIMEIRO_SLOT_LETRA; s < proximoSlot; s++)
+    {
+        if (letraNoSlot[s] == c) return s;
+    }
+
+    if (proximoSlot > 7) return ' ';  // sem slot livre nesta tela
+
+    for (const Glifo &g : fonteGirada)
+    {
+        if (g.letra != c) continue;
+
+        // Gira 180 graus: inverte a ordem das linhas e espelha cada linha.
+        byte girado[8];
+        for (int l = 0; l < 7; l++) girado[6 - l] = espelhar5(g.linhas[l]);
+        girado[7] = 0;
+
+        lcd.createChar(proximoSlot, girado);
+        letraNoSlot[proximoSlot] = c;
+        return proximoSlot++;
+    }
+    return ' ';
+}
+
+// Apaga a tela e libera os slots das letras para a proxima tela.
+void limparTela()
+{
+    lcd.clear();
+    proximoSlot = PRIMEIRO_SLOT_LETRA;
+}
+
+void escrever(int coluna, int linha, const char* texto)
+{
+#if TELA_INVERTIDA
+    uint8_t codigos[LCD_COLUNAS];
+    int n = min((int)strlen(texto), LCD_COLUNAS - coluna);
+    // Carrega os desenhos antes do setCursor (createChar move o cursor).
+    for (int i = 0; i < n; i++) codigos[i] = codigoGirado(texto[i]);
+
+    lcd.setCursor(LCD_COLUNAS - coluna - n, LCD_LINHAS - 1 - linha);
+    for (int i = n - 1; i >= 0; i--) lcd.write(codigos[i]);
+#else
+    lcd.setCursor(coluna, linha);
+    lcd.print(texto);
+#endif
+}
+
+/* ===============================
    LARGE LCD DIGITS
    =============================== */
 
-byte blocoCheio[8] = { 0b11111, 0b11111, 0b11111, 0b11111, 0b11111, 0b11111, 0b11111, 0b11111 };
 byte blocoCima[8] = { 0b11111, 0b11111, 0b11111, 0b11111, 0b00000, 0b00000, 0b00000, 0b00000 };
 byte blocoBaixo[8] = { 0b00000, 0b00000, 0b00000, 0b00000, 0b11111, 0b11111, 0b11111, 0b11111 };
 
-#define CHE 0
-#define CIM 1
-#define BAI 2
+#define CIM 0
+#define BAI 1
+#define CHE 255  // bloco cheio da fonte do chip (igual girado)
 #define VAZ 32
 
 const byte digitos[10][12] = {
@@ -128,9 +247,8 @@ const byte digitos[10][12] = {
 
 void criarCaracteresGrandes()
 {
-    lcd.createChar(0, blocoCheio);
-    lcd.createChar(1, blocoCima);
-    lcd.createChar(2, blocoBaixo);
+    lcd.createChar(CIM, blocoCima);
+    lcd.createChar(BAI, blocoBaixo);
 }
 
 void desenharDigito(int digito, int coluna, int linha)
@@ -139,11 +257,24 @@ void desenharDigito(int digito, int coluna, int linha)
 
     for (int l = 0; l < 4; l++)
     {
+#if TELA_INVERTIDA
+        // Girado: a linha vai para baixo, as colunas sao escritas de tras
+        // para frente e o meio-bloco de cima vira o de baixo (e vice-versa).
+        lcd.setCursor(LCD_COLUNAS - coluna - 3, LCD_LINHAS - 1 - (linha + l));
+        for (int c = 2; c >= 0; c--)
+        {
+            uint8_t bloco = digitos[digito][l * 3 + c];
+            if (bloco == CIM) bloco = BAI;
+            else if (bloco == BAI) bloco = CIM;
+            lcd.write(bloco);
+        }
+#else
         lcd.setCursor(coluna, linha + l);
         for (int c = 0; c < 3; c++)
         {
             lcd.write((uint8_t)digitos[digito][l * 3 + c]);
         }
+#endif
     }
 }
 
@@ -174,34 +305,27 @@ void mostrarNumeroGrande(int numero)
 // Colunas 14-19, linhas 1 e 2: estado dos reles (S1/S2 ligado ou "--").
 void mostrarReles()
 {
-    lcd.setCursor(14, 1);
-    lcd.print(rele_umidade_ligado ? "S1:ON " : "S1:-- ");
-    lcd.setCursor(14, 2);
-    lcd.print(rele_temperatura_ligado ? "S2:ON " : "S2:-- ");
+    escrever(14, 1, rele_umidade_ligado ? "S1:ON " : "S1:-- ");
+    escrever(14, 2, rele_temperatura_ligado ? "S2:ON " : "S2:-- ");
 }
 
 void mostrarTemperatura(float temperatura)
 {
     int valor = round((temperatura * 9.0 / 5.0) + 32.0);
-    lcd.clear();
-    lcd.setCursor(14, 0);
-    lcd.print("TEMP");
+    limparTela();
+    escrever(14, 0, TEXTO("TEMP", "TEM"));
     mostrarNumeroGrande(valor);
     mostrarReles();
-    lcd.setCursor(14, 3);
-    lcd.print((char)223);
-    lcd.print("F");
+    escrever(14, 3, "\xDF" "F");
 }
 
 void mostrarUmidade(float umidade)
 {
-    lcd.clear();
-    lcd.setCursor(14, 0);
-    lcd.print("UMID");
+    limparTela();
+    escrever(14, 0, TEXTO("UMID", "UMI"));
     mostrarNumeroGrande(round(umidade));
     mostrarReles();
-    lcd.setCursor(14, 3);
-    lcd.print("%");
+    escrever(14, 3, "%");
 }
 
 void atualizarLCD()
@@ -310,13 +434,14 @@ void setup()
 
     lcd.init();
     lcd.backlight();
-    lcd.clear();
     criarCaracteresGrandes();
-    lcd.setCursor(0, 0);
-    lcd.print("Iniciando ESP32...");
+    limparTela();
+    escrever(0, 0, TEXTO("Iniciando ESP32...", "INICIANDO"));
+#if !TELA_INVERTIDA
     lcd.setCursor(0, 1);
     lcd.print("ID: ");
     lcd.print(CONTROLLER_ID);
+#endif
 
     Serial.println("[SHT40] Procurando sensor...");
     if (sht40.begin(&Wire))
@@ -329,9 +454,8 @@ void setup()
     else
     {
         Serial.println("[SHT40] ERRO: sensor nao encontrado");
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print("SHT40 ERRO");
+        limparTela();
+        escrever(0, 0, TEXTO("SHT40 ERRO", "ERRO SENSOR"));
     }
 
     RadioEvents.TxDone = OnTxDone;

@@ -71,7 +71,7 @@ class _AlertsPageState extends State<AlertsPage> {
       builder: (context, _) => RefreshIndicator(
         onRefresh: _load,
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+          padding: listPadding(context, top: 8),
           children: [
             if (units.length > 1) ...[
               DropdownButtonFormField<int?>(

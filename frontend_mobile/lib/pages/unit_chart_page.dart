@@ -118,7 +118,7 @@ class _UnitChartPageState extends State<UnitChartPage> {
         );
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+      padding: listPadding(context, top: 4),
       children: [
         if (widget.batchStartedAt != null)
           Padding(

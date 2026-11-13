@@ -142,7 +142,7 @@ class _UnitsPageState extends State<UnitsPage> {
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        padding: listPadding(context, top: 8),
         children: [
           if (!connected) ...[
             const StatusBanner(

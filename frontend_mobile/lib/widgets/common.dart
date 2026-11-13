@@ -494,3 +494,8 @@ class FormErrorText extends StatelessWidget {
     );
   }
 }
+
+/// Margens de uma lista que rola até o fim da tela. Soma embaixo o espaço dos botões de navegação do Android: com
+/// margem própria, a ListView não reserva esse espaço sozinha e o fim do conteúdo ficava atrás dos botões.
+EdgeInsets listPadding(BuildContext context, {double top = 8}) =>
+    EdgeInsets.fromLTRB(16, top, 16, 24 + MediaQuery.paddingOf(context).bottom);

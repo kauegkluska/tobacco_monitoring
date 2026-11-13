@@ -97,7 +97,7 @@ class _EquipmentPageState extends State<EquipmentPage> {
           ? ErrorView(title: 'Não foi possível carregar o equipamento', message: error!, onRetry: _load)
           : !loaded
               ? const LoadingView()
-              : ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 24), children: [_card()]),
+              : ListView(padding: listPadding(context, top: 4), children: [_card()]),
     );
   }
 
