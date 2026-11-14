@@ -1,17 +1,22 @@
 """TEMPORÁRIO: correção da posição do SHT40 para o teste em campo (14/11/2026).
 
-Com o cabo curto, o SHT40 ficou num ponto mais frio que o sensor da estufa. Lado a lado os dois concordam; separados,
-os pares anotados (core/config.py) dão a reta que estima a temperatura no ponto do sensor da estufa; ela nunca fica
-abaixo da leitura do SHT40. Perto do fogo, o sensor da estufa oscila cerca de 3 vezes mais que o SHT40 com a lenha;
-a reta não acompanha essas oscilações, só o patamar.
-A umidade é recalculada para a temperatura estimada, com o mesmo vapor d'água no ar, para o bulbo úmido continuar
-coerente.
+Com o cabo curto, o SHT40 ficou longe do sensor da estufa, que fica perto do fogo. Lado a lado os dois concordam;
+separados, o da estufa reage muito mais à lenha: logo que o fogo sobe, ele sobe cerca de 3,8 vezes mais que o SHT40,
+e a diferença vai diminuindo com o tempo. Por isso a estimativa usa a média do SHT40 nas últimas 2 h (o patamar) e
+amplia o quanto ele está acima ou abaixo dela (a subida ou descida recente). Parâmetros em core/config.py.
 
-Aplicada na chegada da leitura (services/reading_service.py): o sistema inteiro passa a usar o valor corrigido.
-Remover quando o cabo for aumentado.
+A umidade é recalculada para a temperatura estimada, com o mesmo vapor d'água no ar, para o bulbo úmido continuar
+coerente. Aplicada na chegada da leitura (services/reading_service.py): o sistema inteiro passa a usar o valor
+corrigido, e o valor do SHT40 fica guardado em sensor_temperature/sensor_humidity. Remover quando o cabo for aumentado.
 """
 
+from datetime import datetime, timedelta
+
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
 from core.config import settings
+from models.reading import Reading
 from services.psychrometrics import humidity_at
 
 
@@ -23,28 +28,33 @@ def _to_c(fahrenheit: float) -> float:
     return (fahrenheit - 32) / 1.8
 
 
-def _line(points: list[tuple[float, float]]) -> tuple[float, float]:
-    """Inclinação e intercepto da reta de mínimos quadrados pelos pares (SHT40, estufa)."""
-    n = len(points)
-    mean_x = sum(x for x, _ in points) / n
-    mean_y = sum(y for _, y in points) / n
-    sxx = sum((x - mean_x) ** 2 for x, _ in points)
-    if sxx == 0:
-        return 1.0, mean_y - mean_x
-    slope = sum((x - mean_x) * (y - mean_y) for x, y in points) / sxx
-    return slope, mean_y - slope * mean_x
+def estimate(temperature: float, window_mean: float) -> float:
+    """Temperatura (°C) estimada no ponto do sensor da estufa; nunca abaixo da leitura do SHT40."""
+    measured, mean = _to_f(temperature), _to_f(window_mean)
+    estimated = settings.SENSOR_CORRECTION_OFFSET_F + mean + settings.SENSOR_CORRECTION_GAIN * (measured - mean)
+    return _to_c(max(measured, estimated))
 
 
-def corrected_temperature(temperature: float) -> float:
-    """Temperatura (°C) estimada no ponto do sensor da estufa."""
-    slope, intercept = _line(settings.SENSOR_CORRECTION_POINTS_F)
-    measured = _to_f(temperature)
-    return _to_c(max(measured, slope * measured + intercept))
+def _window_mean(db: Session, unit_id: int, temperature: float, now: datetime) -> float:
+    """Média do SHT40 na janela, contando a leitura que acabou de chegar."""
+    start = now - timedelta(minutes=settings.SENSOR_CORRECTION_WINDOW_MINUTES)
+    total, count = (
+        db.query(func.sum(Reading.sensor_temperature), func.count(Reading.sensor_temperature))
+        .filter(
+            Reading.curing_unit_id == unit_id,
+            Reading.is_outlier.is_(False),
+            Reading.sensor_temperature.isnot(None),
+            Reading.timestamp >= start,
+            Reading.timestamp <= now,
+        )
+        .one()
+    )
+    return ((total or 0.0) + temperature) / ((count or 0) + 1)
 
 
-def correct(temperature: float, humidity: float) -> tuple[float, float]:
-    """(temperatura °C, umidade %) no ponto do sensor da estufa; devolve a leitura como veio se a correção estiver desligada."""
+def correct(db: Session, unit_id: int, temperature: float, humidity: float, now: datetime) -> tuple[float, float]:
+    """(temperatura °C, umidade %) no ponto do sensor da estufa; a leitura como veio se a correção estiver desligada."""
     if not settings.SENSOR_CORRECTION_ENABLED:
         return temperature, humidity
-    new_temperature = corrected_temperature(temperature)
+    new_temperature = estimate(temperature, _window_mean(db, unit_id, temperature, now))
     return new_temperature, humidity_at(temperature, humidity, new_temperature)

@@ -228,6 +228,8 @@ def initialize_database(target_engine=None) -> None:
         add_column("readings", "filtered_temperature", "FLOAT")
         add_column("readings", "filtered_humidity", "FLOAT")
         add_column("readings", "filtered_wet_bulb", "FLOAT")
+        add_column("readings", "sensor_temperature", "FLOAT")
+        add_column("readings", "sensor_humidity", "FLOAT")
         add_column("readings", "is_outlier", "BOOLEAN NOT NULL DEFAULT 0")
         add_column("curing_units", "alert_anchor_at", "DATETIME")
         add_column("curing_units", "alert_grace_until", "DATETIME")

@@ -87,8 +87,10 @@ DROP_FLAP_WINDOW = timedelta(minutes=10)
 HEATING_HOLD_MINUTES = 10
 HEATING_CLEAR_MARGIN = 0.3
 HEATING_RESUME_LIMIT = timedelta(hours=2)
-# Até 90 °F a estufa ainda está saindo da temperatura ambiente.
-HEATING_INITIAL_C = 32.2
+# Até 85 °F, início da faixa da Amarelação no guia, a estufa ainda está saindo da temperatura ambiente.
+HEATING_INITIAL_C = 29.4
+# Queda mínima para a volta ao nível anterior não contar como aquecimento rápido (DE; teste em campo de 14/11/2026).
+HEATING_DIP_C = 1.5
 
 SENSOR_FROZEN_MINUTES = 10
 # Com menos amostras que isso não dá para afirmar que o valor congelou.
@@ -271,7 +273,6 @@ def _evaluate_rule(db: Session, unit: CuringUnit, phase: Phase, rule: Rule, samp
         _raise(db, unit, rule.type, tier.severity, _message(rule, phase, unit, now), now, *_shown(rule, sample, tier))
         return
 
-    # Desce um nível por vez enquanto o valor estiver, com folga e por tempo suficiente, dentro do limite.
     margin = HYSTERESIS[rule.metric]
     while level >= 0:
         threshold = rule.tiers[level].threshold
@@ -413,6 +414,27 @@ def _resuming_after_drop(unit: CuringUnit, points: list[tuple[datetime, float]],
     return reference - lowest[1] >= DROP_MARGIN_C and now - lowest[0] <= HEATING_RESUME_LIMIT
 
 
+def _since_recovery(
+    points: list[tuple[datetime, float]], temperature: float, now: datetime,
+) -> list[tuple[datetime, float]] | None:
+    """Volta a um nível já atingido nas últimas 2 h (o fogo baixou e foi reposto) não é aquecimento rápido, mesmo
+    sem o alerta de queda: a janela de 60 min pegaria a queda e a volta como subida. Enquanto a temperatura não passa
+    do nível anterior, None; depois, a queda e a volta contam como se a temperatura tivesse ficado nesse nível, e só
+    a subida acima dele pesa na inclinação."""
+    recent = [point for point in points if now - point[0] <= HEATING_RESUME_LIMIT]
+    if not recent:
+        return points
+    lowest = min(recent, key=lambda point: (point[1], -point[0].timestamp()))
+    before = [point for point in points if point[0] <= lowest[0]]
+    peak_at, peak = max(before, key=lambda point: (point[1], point[0].timestamp()))
+    if peak - lowest[1] < HEATING_DIP_C:
+        return points
+    if temperature < peak:
+        return None
+    back = next((at for at, value in points if at > lowest[0] and value >= peak), now)
+    return [(at, peak if peak_at < at < back else value) for at, value in points]
+
+
 def heating_slopes(db: Session, unit: CuringUnit, phase: Phase, temperature: float, now: datetime) -> list[float] | None:
     """Inclinações (°C/h) das janelas que terminam agora e em cada um dos minutos anteriores, da mais recente à mais
     antiga. None quando o aquecimento é permitido (inicial ou retomada depois de uma queda) ou não dá para calcular.
@@ -427,6 +449,9 @@ def heating_slopes(db: Session, unit: CuringUnit, phase: Phase, temperature: flo
     if phase is PHASES[0]:
         # O aquecimento inicial, permitido, não pode contar na inclinação depois que ele termina.
         points = [point for point in points if point[1] >= HEATING_INITIAL_C]
+    points = _since_recovery(points, temperature, now)
+    if points is None:
+        return None
 
     slopes = [
         slope_per_hour(points, now - timedelta(minutes=minute) - window, now - timedelta(minutes=minute))
@@ -454,6 +479,8 @@ def _evaluate_heating(db: Session, unit: CuringUnit, phase: Phase, samples: list
     _update_rate_cut(unit, phase, slopes)
     active = _active(db, unit, HEATING_TYPE)
     if slopes is None:
+        # Aquecimento permitido (inicial ou retomada) ou sem dados para a inclinação: não há o que manter aberto.
+        _close(db, active, now)
         return
     limit = phase.heating_limit
     details = {"taxa": slopes[0], "taxa_limite": limit}

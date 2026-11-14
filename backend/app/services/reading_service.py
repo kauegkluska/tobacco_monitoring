@@ -127,10 +127,12 @@ def ingest_telemetry(db: Session, data: TelemetryInput) -> dict:
         return finish("drying_not_started")
 
     # TEMPORÁRIO: posição do SHT40 no teste em campo (services/sensor_correction.py).
-    temperature, humidity = correct(data.temperature, data.humidity)
+    temperature, humidity = correct(db, unit.id, data.temperature, data.humidity, now)
     reading = Reading(
         temperature=temperature,
         humidity=humidity,
+        sensor_temperature=data.temperature,
+        sensor_humidity=data.humidity,
         timestamp=now,
         curing_unit_id=unit.id,
         device_id=device.id,

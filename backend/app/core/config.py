@@ -36,16 +36,14 @@ class Settings(BaseSettings):
     # Pressão usada para estimar o bulbo úmido (padrão: Lages, 916 m). O efeito no resultado é pequeno.
     ATMOSPHERIC_PRESSURE_KPA: float = 90.8
     # TEMPORÁRIO (teste em campo, 14/11/2026): o SHT40 ficou longe do sensor da estufa por causa do cabo curto.
-    # Ligado, cada leitura que chega é convertida para a temperatura estimada no ponto do sensor da estufa, a partir de
-    # pares medidos (SHT40, estufa) em °F, pela reta que melhor passa por todos, e todo o sistema usa o valor corrigido.
+    # Ligado, cada leitura que chega é convertida para a temperatura estimada no ponto do sensor da estufa
+    # (services/sensor_correction.py), e todo o sistema usa o valor corrigido. Em °F:
+    #   estufa = OFFSET + média do SHT40 na janela + GAIN x (SHT40 agora - essa média)
+    # Ajustado a 18 pares anotados com horário em 14/11 (erro médio 1,6 °F; máximo 6,3 °F, deixando cada par de fora).
     SENSOR_CORRECTION_ENABLED: bool = False
-    # 14/11: 4 pares avulsos + 17 anotados das 10:20 às 11:16 (SHT40 pelo banco, com decimais). Reta ≈ 1,29 x - 16,1.
-    SENSOR_CORRECTION_POINTS_F: list[tuple[float, float]] = [
-        (100.0, 115.0), (116.0, 133.0), (119.0, 140.0), (120.0, 147.5),
-        (120.67, 145.0), (120.93, 144.0), (120.63, 142.0), (119.84, 139.0), (119.38, 135.0), (118.38, 133.0),
-        (117.37, 131.0), (117.41, 132.0), (118.07, 135.0), (119.13, 136.0), (119.13, 136.0), (119.88, 137.0),
-        (120.13, 138.0), (119.87, 138.0), (119.88, 138.0), (119.91, 137.0), (119.60, 136.0),
-    ]
+    SENSOR_CORRECTION_OFFSET_F: float = 15.0
+    SENSOR_CORRECTION_GAIN: float = 3.8
+    SENSOR_CORRECTION_WINDOW_MINUTES: int = 120
     # Aquecimento rápido: janela da regressão. Fica como "info" até medir a oscilação real da fornalha.
     HEATING_RATE_WINDOW_MINUTES: int = 60
     HEATING_RATE_SEVERITY: str = "info"
