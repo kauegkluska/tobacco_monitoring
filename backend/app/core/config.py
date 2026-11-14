@@ -39,7 +39,13 @@ class Settings(BaseSettings):
     # Ligado, cada leitura que chega é convertida para a temperatura estimada no ponto do sensor da estufa, a partir de
     # pares medidos (SHT40, estufa) em °F, pela reta que melhor passa por todos, e todo o sistema usa o valor corrigido.
     SENSOR_CORRECTION_ENABLED: bool = False
-    SENSOR_CORRECTION_POINTS_F: list[tuple[float, float]] = [(100.0, 115.0), (116.0, 133.0), (119.0, 140.0)]
+    # 14/11: 4 pares avulsos + 17 anotados das 10:20 às 11:16 (SHT40 pelo banco, com decimais). Reta ≈ 1,29 x - 16,1.
+    SENSOR_CORRECTION_POINTS_F: list[tuple[float, float]] = [
+        (100.0, 115.0), (116.0, 133.0), (119.0, 140.0), (120.0, 147.5),
+        (120.67, 145.0), (120.93, 144.0), (120.63, 142.0), (119.84, 139.0), (119.38, 135.0), (118.38, 133.0),
+        (117.37, 131.0), (117.41, 132.0), (118.07, 135.0), (119.13, 136.0), (119.13, 136.0), (119.88, 137.0),
+        (120.13, 138.0), (119.87, 138.0), (119.88, 138.0), (119.91, 137.0), (119.60, 136.0),
+    ]
     # Aquecimento rápido: janela da regressão. Fica como "info" até medir a oscilação real da fornalha.
     HEATING_RATE_WINDOW_MINUTES: int = 60
     HEATING_RATE_SEVERITY: str = "info"

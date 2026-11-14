@@ -1,8 +1,9 @@
 """TEMPORÁRIO: correção da posição do SHT40 para o teste em campo (14/11/2026).
 
 Com o cabo curto, o SHT40 ficou num ponto mais frio que o sensor da estufa. Lado a lado os dois concordam; separados,
-o da estufa marcou 115, 133 e 140 °F com o SHT40 em 100, 116 e 119 °F. A reta ajustada a esses pares estima a
-temperatura no ponto do sensor da estufa; ela nunca fica abaixo da leitura do SHT40.
+os pares anotados (core/config.py) dão a reta que estima a temperatura no ponto do sensor da estufa; ela nunca fica
+abaixo da leitura do SHT40. Perto do fogo, o sensor da estufa oscila cerca de 3 vezes mais que o SHT40 com a lenha;
+a reta não acompanha essas oscilações, só o patamar.
 A umidade é recalculada para a temperatura estimada, com o mesmo vapor d'água no ar, para o bulbo úmido continuar
 coerente.
 
