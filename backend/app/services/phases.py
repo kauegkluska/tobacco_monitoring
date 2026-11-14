@@ -2,10 +2,6 @@
 
 O SHT40 mede temperatura e umidade relativa. O bulbo úmido, que é o que a literatura de cura controla, é estimado
 a partir delas (services/psychrometrics.py). "DE" marca decisão de engenharia, a calibrar em campo.
-
-Faixas, bulbo úmido e durações seguem o guia de cura da empresa integradora para estufa de ar forçado com
-recirculação (14/11/2026), em °F no original. O guia tem 5 fases; a Fixação de cor (108-115 °F) entra no Murchamento.
-Cada faixa vai do fim da fase anterior até o alvo da própria fase, cobrindo os intervalos que o guia deixa entre elas.
 """
 
 import math
@@ -106,63 +102,60 @@ PHASES: tuple[Phase, ...] = (
     Phase(
         key="amarelacao",
         name="Amarelação",
-        # Guia: 85-95 °F, úmido 83-90 °F, 48-56 h.
-        temp_min=29.4, temp_max=35.6, humidity_min=80, humidity_max=95,
+        temp_min=35, temp_max=40, humidity_min=80, humidity_max=95,
         min_hours=48, max_hours=60,
         rules=(
-            _temperature_high(35.6, 37.8, 10),
+            _temperature_high(40, 42, 10),
             Rule(DEPRESSION_HIGH_TYPE, "depression", "high", (Tier(DRY_AIR_DEPRESSION_C, "warning", 15),)),
         ),
         heating_limit=1.1,
-        advance_temp_at_least=35, advance_temp_minutes=10,
+        advance_temp_at_least=38, advance_temp_minutes=10,
         visual_check="Folhas amarelas e começando a murchar.",
-        alert_temp_max=35.6,
+        alert_temp_max=40,
         drop_critical_hours=math.inf,
         no_readings_warning_seconds=None, no_readings_critical_seconds=300,
     ),
     Phase(
         key="murchamento",
         name="Murchamento",
-        # Guia: Murchamento 96-105 °F (úmido 90-96 °F, 24-30 h) + Fixação de cor 108-115 °F (úmido 98-101 °F, 20-24 h).
-        temp_min=35.6, temp_max=47.8, humidity_min=60, humidity_max=85,
-        min_hours=44, max_hours=54,
+        temp_min=40, temp_max=48, humidity_min=65, humidity_max=85,
+        min_hours=18, max_hours=24,
         rules=(
-            _temperature_high(47.8, 51.7, 2),
+            _temperature_high(47.8, 52, 2),
             _WET_BULB_HIGH,
+            # Bulbo úmido 2 °C abaixo do alvo do flap por 15 min (DE).
             Rule(HUMIDITY_LOW_TYPE, "wet_bulb_deficit", "high", (Tier(WET_BULB_LOW_MARGIN_C, "info", 15),)),
         ),
         heating_limit=0.8,
-        advance_temp_at_least=46.1, advance_temp_minutes=10,
+        advance_temp_at_least=46, advance_temp_minutes=10,
         visual_check="Folhas completamente murchas, moles ao toque.",
-        alert_temp_max=47.8,
+        alert_temp_max=48,
         drop_critical_hours=0,
         no_readings_warning_seconds=300, no_readings_critical_seconds=1800,
     ),
     Phase(
         key="secagem_folha",
         name="Secagem da folha",
-        # Guia: 118-125 °F, úmido 102-103 °F, 24-30 h.
-        temp_min=47.8, temp_max=54.4, humidity_min=45, humidity_max=60,
-        min_hours=24, max_hours=30,
-        rules=(_temperature_high(54.4, 60, 2), _WET_BULB_HIGH),
+        temp_min=48, temp_max=60, humidity_min=30, humidity_max=65,
+        min_hours=24, max_hours=60,
+        rules=(_temperature_high(57.2, 63, 2), _WET_BULB_HIGH),
         heating_limit=1.1,
-        advance_temp_at_least=51.7, advance_temp_minutes=60,
+        advance_temp_at_least=54.4, advance_temp_minutes=60,
         visual_check="Lâmina seca e quebradiça; só o talo ainda úmido.",
-        alert_temp_max=54.4,
+        alert_temp_max=57.2,
         drop_critical_hours=0,
         no_readings_warning_seconds=300, no_readings_critical_seconds=1800,
     ),
     Phase(
         key="secagem_talo",
         name="Secagem do talo",
-        # Guia: 130-150 °F, úmido 104-110 °F, 28-36 h.
-        temp_min=54.4, temp_max=65.6, humidity_min=25, humidity_max=45,
-        min_hours=28, max_hours=36,
-        rules=(_temperature_high(65.6, 68.3, 2, emergency=71.1),),
+        temp_min=60, temp_max=74, humidity_min=15, humidity_max=40,
+        min_hours=18, max_hours=48,
+        rules=(_temperature_high(74, 77, 2, emergency=80),),
         heating_limit=1.7,
-        advance_temp_at_least=64.4, advance_temp_minutes=10,
+        advance_temp_at_least=70, advance_temp_minutes=10,
         visual_check="Talo seco: quebra ao dobrar.",
-        alert_temp_max=65.6,
+        alert_temp_max=74,
         drop_critical_hours=12,
         no_readings_warning_seconds=300, no_readings_critical_seconds=1800,
     ),
@@ -222,17 +215,15 @@ class FlapSetting:
     open_sustain_minutes: int = 0
 
 
-# Murchamento: o alvo acompanha a subida do bulbo seco, de 90 °F úmido a 96 °F seco até 101 °F úmido a 115 °F seco
-# (guia; reta e banda: DE).
-WILT_SETPOINT = ((35.6, 32.2), (46.1, 38.3))
+# Murchamento: o alvo acompanha a subida do bulbo seco de 43 °C a 48 °C (C10, C15; reta e banda: DE).
+WILT_SETPOINT = ((43.0, 38.0), (48.0, 40.0))
 FLAP_BAND_C = 0.5
 # Teto das exceções no Murchamento e na Secagem da folha (C05, C14).
 FLAP_LEAF_CEILING_C = 40.6
-LEAF_SETPOINT_C = 39.2  # guia: 102-103 °F
+LEAF_SETPOINT_C = 39.5
 # Talo: nas primeiras horas ainda sai água da folha e do talo (C11); banda larga pela incerteza da estimativa (C39).
 STEM_A_HOURS = 18
-# Alvo do talo A pela reta do guia: 104 °F úmido a 130 °F seco até 110 °F úmido a 150 °F seco.
-STEM_SETPOINT = ((54.4, 40.0), (65.6, 43.3))
+STEM_A_SETPOINT_C = 43.0
 STEM_A_BAND_C = 1.0
 STEM_CEILING_C = 45.0  # DE
 # Talo B: só abre com umidade muito alta e persistente (DE); fecha junto com a folha seca (C17).
@@ -241,20 +232,11 @@ STEM_B_CLOSE_C = 43.0
 STEM_B_SUSTAIN_MINUTES = 10
 
 
-def _setpoint_line(line: tuple[tuple[float, float], tuple[float, float]], temperature: float) -> float:
-    (t_low, sp_low), (t_high, sp_high) = line
-    fraction = min(1.0, max(0.0, (temperature - t_low) / (t_high - t_low)))
-    return sp_low + fraction * (sp_high - sp_low)
-
-
 def wilting_setpoint(temperature: float) -> float:
     """Alvo do bulbo úmido no Murchamento, pela reta em função do bulbo seco."""
-    return _setpoint_line(WILT_SETPOINT, temperature)
-
-
-def stem_setpoint(temperature: float) -> float:
-    """Alvo do bulbo úmido no início da Secagem do talo, pela reta em função do bulbo seco."""
-    return _setpoint_line(STEM_SETPOINT, temperature)
+    (t_low, sp_low), (t_high, sp_high) = WILT_SETPOINT
+    fraction = min(1.0, max(0.0, (temperature - t_low) / (t_high - t_low)))
+    return sp_low + fraction * (sp_high - sp_low)
 
 
 def flap_setting(phase: Phase, temperature: float, hours_in_phase: float) -> FlapSetting | None:
@@ -268,8 +250,9 @@ def flap_setting(phase: Phase, temperature: float, hours_in_phase: float) -> Fla
         )
     if phase.key == "secagem_talo":
         if hours_in_phase < STEM_A_HOURS:
-            setpoint = stem_setpoint(temperature)
-            return FlapSetting(setpoint, setpoint + STEM_A_BAND_C, setpoint - STEM_A_BAND_C, STEM_CEILING_C)
+            return FlapSetting(
+                STEM_A_SETPOINT_C, STEM_A_SETPOINT_C + STEM_A_BAND_C, STEM_A_SETPOINT_C - STEM_A_BAND_C, STEM_CEILING_C,
+            )
         return FlapSetting(None, STEM_B_OPEN_C, STEM_B_CLOSE_C, STEM_CEILING_C, STEM_B_SUSTAIN_MINUTES)
     return None
 

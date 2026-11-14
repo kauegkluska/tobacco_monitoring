@@ -94,8 +94,8 @@ DROP_FLAP_WINDOW = timedelta(minutes=10)
 HEATING_HOLD_MINUTES = 10
 HEATING_CLEAR_MARGIN = 0.3
 HEATING_RESUME_LIMIT = timedelta(hours=2)
-# Até 85 °F, início da faixa da Amarelação no guia, a estufa ainda está saindo da temperatura ambiente.
-HEATING_INITIAL_C = 29.4
+# Até 90 °F a estufa ainda está saindo da temperatura ambiente.
+HEATING_INITIAL_C = 32.2
 # Queda mínima para a volta ao nível anterior não contar como aquecimento rápido (DE; teste em campo de 14/11/2026).
 HEATING_DIP_C = 1.5
 
