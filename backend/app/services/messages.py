@@ -52,6 +52,7 @@ MANUAL_FLAP = (  # A3
     "{flap} continua aberto à mão. Se as folhas já enxugaram, volte para o Automático: "
     "ar demais na amarelação pode deixar o fumo verde."
 )
+FIREWOOD = "A temperatura está bem abaixo do alvo. Hora de colocar lenha."
 WEAK_FIRE = "O fogo não está acompanhando a ventilação."  # A5
 
 ALL = tuple(value for name, value in dict(globals()).items() if name.isupper() and isinstance(value, str))

@@ -35,6 +35,7 @@ from services.phases import (
     BELOW_RANGE_TYPE,
     DEPRESSION_HIGH_TYPE,
     DROP_TYPE,
+    FIREWOOD_TYPE,
     HEATING_TYPE,
     HUMIDITY_LOW_TYPE,
     MANUAL_FLAP_TYPE,
@@ -56,6 +57,12 @@ from services.phases import (
 )
 from services.relays import field, held, mode_of, name_of, relay_state
 from services.stage_service import stage_hours
+
+# "Colocar lenha": abre a 10 °F abaixo da temperatura alvo, por 1 min, e encerra quando volta a 7 °F dele, para não
+# apitar de novo enquanto a temperatura oscila no limite. Atenção, para o receptor apitar (pedido do produtor, 14/11/2026).
+FIREWOOD_BELOW_TARGET_C = 10 / 1.8
+FIREWOOD_CLEAR_C = 7 / 1.8
+FIREWOOD_SUSTAIN_MINUTES = 1
 
 # Folga e tempo para encerrar ou rebaixar um alerta, para ele não oscilar perto do limite (DE).
 HYSTERESIS = {"temperature": 0.5, "wet_bulb": 0.5, "depression": 0.5, "humidity": 3.0, "wet_bulb_deficit": 0.5}
@@ -405,6 +412,26 @@ def _evaluate_drop(db: Session, unit: CuringUnit, phase: Phase, samples: list[Sa
         _raise(db, unit, DROP_TYPE, severity, _drop_message(db, unit, now), now, temperature, threshold, details)
 
 
+def _evaluate_firewood(db: Session, unit: CuringUnit, samples: list[Sample], now: datetime) -> None:
+    """Apita quando a temperatura fica bem abaixo do alvo definido pelo produtor."""
+    active = _active(db, unit, FIREWOOD_TYPE)
+    target = unit.target_temperature
+    if target is None:
+        _close(db, active, now)
+        return
+    temperature = samples[-1].temperature
+    threshold = target - FIREWOOD_BELOW_TARGET_C
+    details = {"tseco": temperature, "alvo": target}
+    if active is not None:
+        if temperature >= target - FIREWOOD_CLEAR_C:
+            _close(db, active, now)
+        else:
+            _update(active, active.severity, msg.FIREWOOD, temperature, threshold, details)
+        return
+    if persisted(samples, now, FIREWOOD_SUSTAIN_MINUTES, lambda sample: sample.temperature <= threshold):
+        _raise(db, unit, FIREWOOD_TYPE, "warning", msg.FIREWOOD, now, temperature, threshold, details)
+
+
 def _resuming_after_drop(unit: CuringUnit, points: list[tuple[datetime, float]], temperature: float, now: datetime) -> bool:
     """Retomada depois de uma queda: subir mais rápido é o procedimento recomendado, por até 2 h."""
     reference = unit.drop_reference
@@ -685,6 +712,7 @@ def evaluate_reading(db: Session, unit: CuringUnit, device: Device | None, readi
         _evaluate_drop(db, unit, phase, samples, now)
         _evaluate_heating(db, unit, phase, samples, now)
         _evaluate_very_wet(db, unit, phase, samples, now)
+        _evaluate_firewood(db, unit, samples, now)
     _evaluate_overdue(db, unit, phase, now)
     _evaluate_wet_load(db, unit, phase, now)
     _evaluate_manual_flap(db, unit, phase, now)

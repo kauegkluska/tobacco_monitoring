@@ -31,6 +31,8 @@ WET_LOAD_TYPE = "Início da Amarelação"
 MANUAL_FLAP_TYPE = "Ventilação aberta à mão"
 TARGET_LIMITED_TYPE = "Alvo reduzido"
 WEAK_FIRE_TYPE = "Fogo fraco"
+# A temperatura ficou bem abaixo do alvo do produtor: apita para ele ir colocar lenha.
+FIREWOOD_TYPE = "Colocar lenha"
 
 
 @dataclass(frozen=True)
