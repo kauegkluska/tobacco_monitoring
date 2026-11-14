@@ -35,6 +35,12 @@ class Settings(BaseSettings):
 
     # Pressão usada para estimar o bulbo úmido (padrão: Lages, 916 m). O efeito no resultado é pequeno.
     ATMOSPHERIC_PRESSURE_KPA: float = 90.8
+    # TEMPORÁRIO (teste em campo, 14/11/2026): o SHT40 ficou longe do sensor da estufa por causa do cabo curto.
+    # Ligado, cada leitura que chega é convertida para a temperatura estimada no ponto do sensor da estufa, a partir de
+    # dois pares medidos (SHT40 -> estufa, em °F), e todo o sistema passa a usar o valor corrigido.
+    SENSOR_CORRECTION_ENABLED: bool = False
+    SENSOR_CORRECTION_LOW_F: tuple[float, float] = (100.0, 115.0)
+    SENSOR_CORRECTION_HIGH_F: tuple[float, float] = (115.0, 143.0)
     # Aquecimento rápido: janela da regressão. Fica como "info" até medir a oscilação real da fornalha.
     HEATING_RATE_WINDOW_MINUTES: int = 60
     HEATING_RATE_SEVERITY: str = "info"

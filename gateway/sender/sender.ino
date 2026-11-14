@@ -40,7 +40,7 @@
 #define INTERVALO_TELA 3000
 
 // Identificador único deste controlador ESP32 (use este ID para vincular no app)
-#define CONTROLLER_ID          "ESP32-TOBACCO-02"
+#define CONTROLLER_ID          "ESP32-TOBACCO-03"
 #define HARDWARE_MODEL         "Heltec WiFi LoRa 32 V3"
 
 /* ===============================

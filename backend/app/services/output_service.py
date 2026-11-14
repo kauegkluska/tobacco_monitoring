@@ -109,11 +109,6 @@ def trigger_of(unit: CuringUnit, output: str) -> str:
 
 
 def _auto_state(current: bool, value: float | None, low: float, high: float, margin: float, direction: str) -> bool:
-    """Liga ao violar o limite e só desliga com folga dentro da faixa, para o relé não ficar batendo.
-
-    Na regra "target", `low` e `high` são as bordas da faixa do alvo: liga abaixo dela, desliga acima dela
-    e, dentro dela, mantém o estado atual. A margem não se aplica.
-    """
     if value is None:
         return current
     if direction == "target":

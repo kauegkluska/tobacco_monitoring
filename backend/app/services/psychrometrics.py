@@ -48,6 +48,12 @@ def wet_bulb(dry_bulb: float, relative_humidity: float, pressure_kpa: float) -> 
     return (low + high) / 2
 
 
+def humidity_at(temperature: float, humidity: float, new_temperature: float) -> float:
+    """Umidade relativa (%) do mesmo ar levado de temperature a new_temperature (°C), sem ganhar nem perder vapor."""
+    vapor = humidity / 100 * _saturation_pressure(temperature)
+    return min(100.0, 100 * vapor / _saturation_pressure(new_temperature))
+
+
 def estimate_wet_bulb(temperature: float, humidity: float) -> float:
     """Bulbo úmido estimado (°C) de uma leitura do SHT40, na pressão atmosférica configurada para a estufa."""
     return wet_bulb(temperature, humidity, settings.ATMOSPHERIC_PRESSURE_KPA)

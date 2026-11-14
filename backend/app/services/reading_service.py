@@ -11,6 +11,7 @@ from schemas.readings import TelemetryInput
 from services.alert_engine import evaluate_reading
 from services.device_service import find_device, normalize_code, normalize_mac
 from services.output_service import commands, record_confirmation, update_outputs
+from services.sensor_correction import correct
 
 
 def _resolve_unit(db: Session, device: Device, requested_unit_id: int | None) -> CuringUnit | None:
@@ -125,9 +126,11 @@ def ingest_telemetry(db: Session, data: TelemetryInput) -> dict:
         update_outputs(db, unit)
         return finish("drying_not_started")
 
+    # TEMPORÁRIO: posição do SHT40 no teste em campo (services/sensor_correction.py).
+    temperature, humidity = correct(data.temperature, data.humidity)
     reading = Reading(
-        temperature=data.temperature,
-        humidity=data.humidity,
+        temperature=temperature,
+        humidity=humidity,
         timestamp=now,
         curing_unit_id=unit.id,
         device_id=device.id,
