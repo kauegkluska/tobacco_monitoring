@@ -38,12 +38,14 @@ class Settings(BaseSettings):
     # TEMPORÁRIO (teste em campo, 14/11/2026): o SHT40 ficou longe do sensor da estufa por causa do cabo curto.
     # Ligado, cada leitura que chega é convertida para a temperatura estimada no ponto do sensor da estufa
     # (services/sensor_correction.py), e todo o sistema usa o valor corrigido. Em °F:
-    #   estufa = OFFSET + média do SHT40 na janela + GAIN x (SHT40 agora - essa média)
-    # Ajustado a 18 pares anotados com horário em 14/11 (erro médio 1,6 °F; máximo 6,3 °F, deixando cada par de fora).
+    #   estufa = OFFSET + média exponencial do SHT40 + GAIN x (SHT40 agora - essa média)
+    # Ajustado a 41 pares anotados com horário em 14/11, com duas lenhas acompanhadas minuto a minuto (erro médio
+    # 2,7 °F e máximo 5,7 °F, deixando cada par de fora).
     SENSOR_CORRECTION_ENABLED: bool = False
-    SENSOR_CORRECTION_OFFSET_F: float = 15.0
-    SENSOR_CORRECTION_GAIN: float = 3.8
-    SENSOR_CORRECTION_WINDOW_MINUTES: int = 120
+    SENSOR_CORRECTION_OFFSET_F: float = 14.2
+    SENSOR_CORRECTION_GAIN: float = 3.1
+    # Constante de tempo da média exponencial; leituras mais antigas que 4 constantes não pesam.
+    SENSOR_CORRECTION_TAU_MINUTES: float = 30.0
     # Aquecimento rápido: janela da regressão. Fica como "info" até medir a oscilação real da fornalha.
     HEATING_RATE_WINDOW_MINUTES: int = 60
     HEATING_RATE_SEVERITY: str = "info"
