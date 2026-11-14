@@ -1,8 +1,8 @@
 """TEMPORÁRIO: correção da posição do SHT40 para o teste em campo (14/11/2026).
 
 Com o cabo curto, o SHT40 ficou num ponto mais frio que o sensor da estufa. Lado a lado os dois concordam; separados,
-o da estufa marcou 115 °F com o SHT40 em 100 °F e 143 °F com ele em 115 °F. A reta por esses dois pares estima a
-temperatura no ponto do sensor da estufa. Abaixo do ponto em que a reta cruza a leitura real (~83 °F) não há correção.
+o da estufa marcou 115, 133 e 140 °F com o SHT40 em 100, 116 e 119 °F. A reta ajustada a esses pares estima a
+temperatura no ponto do sensor da estufa; ela nunca fica abaixo da leitura do SHT40.
 A umidade é recalculada para a temperatura estimada, com o mesmo vapor d'água no ar, para o bulbo úmido continuar
 coerente.
 
@@ -22,12 +22,23 @@ def _to_c(fahrenheit: float) -> float:
     return (fahrenheit - 32) / 1.8
 
 
+def _line(points: list[tuple[float, float]]) -> tuple[float, float]:
+    """Inclinação e intercepto da reta de mínimos quadrados pelos pares (SHT40, estufa)."""
+    n = len(points)
+    mean_x = sum(x for x, _ in points) / n
+    mean_y = sum(y for _, y in points) / n
+    sxx = sum((x - mean_x) ** 2 for x, _ in points)
+    if sxx == 0:
+        return 1.0, mean_y - mean_x
+    slope = sum((x - mean_x) * (y - mean_y) for x, y in points) / sxx
+    return slope, mean_y - slope * mean_x
+
+
 def corrected_temperature(temperature: float) -> float:
     """Temperatura (°C) estimada no ponto do sensor da estufa."""
-    (x1, y1), (x2, y2) = settings.SENSOR_CORRECTION_LOW_F, settings.SENSOR_CORRECTION_HIGH_F
+    slope, intercept = _line(settings.SENSOR_CORRECTION_POINTS_F)
     measured = _to_f(temperature)
-    estimated = y1 + (y2 - y1) * (measured - x1) / (x2 - x1)
-    return _to_c(max(measured, estimated))
+    return _to_c(max(measured, slope * measured + intercept))
 
 
 def correct(temperature: float, humidity: float) -> tuple[float, float]:
