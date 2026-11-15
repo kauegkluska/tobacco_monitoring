@@ -104,6 +104,12 @@ def test_slow_furnace_drop_is_detected(unit_id):
             break
     assert temperature_when_open is not None
     assert 51.9 < temperature_when_open < 52.2
+    # Ainda dentro da faixa da fase (48 a 60 °C): só informa, sem apito.
+    assert sim.active()[DROP_TYPE].severity == "info"
+    # Abaixo da faixa: alerta novo, de atenção.
+    sim.run(5, 47, 35)
+    drops = [alert for alert in sim.all_alerts() if alert.type == DROP_TYPE]
+    assert [alert.severity for alert in drops] == ["info", "warning"]
     assert sim.active()[DROP_TYPE].severity == "warning"
 
 
@@ -168,14 +174,22 @@ def test_drop_closes_when_temperature_recovers(unit_id):
 
 
 def test_stem_drop_is_critical_only_at_the_start_of_the_phase(unit_id):
+    # Abaixo da faixa do talo (60 °C).
     sim = after_grace(unit_id, "Secagem do talo", 70, 25, hours=2)
-    sim.run(8, 66, 25)
+    sim.run(8, 59, 25)
     assert sim.active()[DROP_TYPE].severity == "critical"
 
     other = make_second_unit(unit_id)
     late = after_grace(other, "Secagem do talo", 70, 25, hours=14)
-    late.run(8, 66, 25)
+    late.run(8, 59, 25)
     assert late.active()[DROP_TYPE].severity == "warning"
+
+
+def test_drop_inside_the_range_does_not_ring(unit_id):
+    # Estufa em 15/11/2026: de 157 para 149 °F depois da lenha, ainda dentro da faixa do talo.
+    sim = after_grace(unit_id, "Secagem do talo", 69.5, 25, hours=14)
+    sim.run(8, 65, 25)
+    assert sim.active()[DROP_TYPE].severity == "info"
 
 
 def make_second_unit(reference_unit_id: int) -> int:

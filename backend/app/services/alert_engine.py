@@ -415,12 +415,19 @@ def _evaluate_drop(db: Session, unit: CuringUnit, phase: Phase, samples: list[Sa
     reference = min(phase.alert_temp_max, max(previous, temperature))
     unit.drop_reference = reference
     threshold = reference - DROP_MARGIN_C
-    severity = "critical" if stage_hours(unit, now) < phase.drop_critical_hours else "warning"
+    if temperature >= phase.temp_min:
+        # Ainda dentro da faixa da fase: só informa, sem apito no receptor (pedido do produtor, 15/11/2026).
+        severity = "info"
+    else:
+        severity = "critical" if stage_hours(unit, now) < phase.drop_critical_hours else "warning"
     details = {"tseco": temperature}
     if active is not None:
         ratio = window_ratio(samples, now, CLEAR_MINUTES, lambda s: s.temperature >= reference - DROP_CLEAR_MARGIN_C)
         if ratio is not None and ratio >= PERSISTENCE_FRACTION:
             _close(db, active, now)
+        elif SEVERITY_RANK[severity] > SEVERITY_RANK.get(active.severity, 0):
+            # Saiu da faixa: alerta novo, mais grave, para o receptor apitar.
+            _raise(db, unit, DROP_TYPE, severity, _drop_message(db, unit, now), now, temperature, threshold, details)
         else:
             # A causa citada fica até o alerta encerrar: só troca por outra causa, nunca pelo texto genérico.
             message = _drop_message(db, unit, now)
