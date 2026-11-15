@@ -67,6 +67,9 @@ FIREWOOD_SUSTAIN_MINUTES = 1
 # Folga e tempo para encerrar ou rebaixar um alerta, para ele não oscilar perto do limite (DE).
 HYSTERESIS = {"temperature": 0.5, "wet_bulb": 0.5, "depression": 0.5, "humidity": 3.0, "wet_bulb_deficit": 0.5}
 CLEAR_MINUTES = 2
+# Abaixo da faixa: subindo pelo menos isso em 10 min, o produtor já reagiu (lenha) e o alerta não abre (DE; 14/11/2026).
+BELOW_RANGE_RISING_C = 1.0
+BELOW_RANGE_RISING_MINUTES = 10
 
 # A janela maior usada pelas regras (abaixo da faixa e condensação).
 SAMPLE_WINDOW = timedelta(minutes=30)
@@ -259,6 +262,14 @@ def _shown(rule: Rule, sample: Sample, tier: Tier) -> tuple:
     return _shown_value(rule, sample), _shown_threshold(rule, tier), _details(rule, sample, tier)
 
 
+def _cleared(rule: Rule, tier: Tier, samples: list[Sample], now: datetime) -> bool:
+    """Os últimos minutos voltaram para o lado de dentro do limite do nível, com a margem de histerese."""
+    margin = HYSTERESIS[rule.metric]
+    limit = tier.threshold - margin if rule.direction == "high" else tier.threshold + margin
+    ratio = window_ratio(samples, now, CLEAR_MINUTES, lambda s: not _over(_metric(s, rule.metric), rule.direction, limit))
+    return ratio is not None and ratio >= PERSISTENCE_FRACTION
+
+
 def _evaluate_rule(db: Session, unit: CuringUnit, phase: Phase, rule: Rule, samples: list[Sample], now: datetime) -> None:
     sample = samples[-1]
     worst = -1
@@ -268,7 +279,8 @@ def _evaluate_rule(db: Session, unit: CuringUnit, phase: Phase, rule: Rule, samp
 
     active = _active(db, unit, rule.type)
     if active is None:
-        if worst >= 0:
+        # Janela longa ainda fora, mas os últimos minutos já voltaram: abrir aqui faria o alerta abrir e fechar a cada leitura.
+        if worst >= 0 and not _cleared(rule, rule.tiers[worst], samples, now):
             tier = rule.tiers[worst]
             _raise(db, unit, rule.type, tier.severity, _message(rule, phase, unit, now), now, *_shown(rule, sample, tier))
         return
@@ -280,13 +292,7 @@ def _evaluate_rule(db: Session, unit: CuringUnit, phase: Phase, rule: Rule, samp
         _raise(db, unit, rule.type, tier.severity, _message(rule, phase, unit, now), now, *_shown(rule, sample, tier))
         return
 
-    margin = HYSTERESIS[rule.metric]
-    while level >= 0:
-        threshold = rule.tiers[level].threshold
-        limit = threshold - margin if rule.direction == "high" else threshold + margin
-        ratio = window_ratio(samples, now, CLEAR_MINUTES, lambda s: not _over(_metric(s, rule.metric), rule.direction, limit))
-        if ratio is None or ratio < PERSISTENCE_FRACTION:
-            break
+    while level >= 0 and _cleared(rule, rule.tiers[level], samples, now):
         level -= 1
     if level < 0:
         _close(db, active, now)
@@ -346,6 +352,8 @@ def _evaluate_below_range(db: Session, unit: CuringUnit, phase: Phase, samples: 
     if _in_grace(unit, now):
         _close(db, _active(db, unit, BELOW_RANGE_TYPE), now)
         return
+    if _active(db, unit, BELOW_RANGE_TYPE) is None and _rising(samples, now):
+        return
     rule = Rule(
         BELOW_RANGE_TYPE,
         "temperature",
@@ -353,6 +361,16 @@ def _evaluate_below_range(db: Session, unit: CuringUnit, phase: Phase, samples: 
         (Tier(phase.temp_min - BELOW_RANGE_MARGIN_C, "warning", BELOW_RANGE_SUSTAIN_MINUTES),),
     )
     _evaluate_rule(db, unit, phase, rule, samples, now)
+
+
+def _rising(samples: list[Sample], now: datetime) -> bool:
+    """Média dos últimos 2 min acima da de 10 min atrás em pelo menos BELOW_RANGE_RISING_C."""
+    before = now - timedelta(minutes=BELOW_RANGE_RISING_MINUTES)
+    recent = [s.temperature for s in samples if s.at >= now - timedelta(minutes=CLEAR_MINUTES)]
+    earlier = [s.temperature for s in samples if before - timedelta(minutes=CLEAR_MINUTES) <= s.at <= before]
+    if not recent or not earlier:
+        return False
+    return sum(recent) / len(recent) - sum(earlier) / len(earlier) >= BELOW_RANGE_RISING_C
 
 
 def _drop_suppressed(db: Session, unit: CuringUnit, now: datetime) -> bool:

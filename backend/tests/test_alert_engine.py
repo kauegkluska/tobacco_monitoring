@@ -195,8 +195,8 @@ def test_recovery_after_a_drop_is_not_fast_heating(unit_id):
     for minute in range(1, 54):
         sim.run(1, 50 + 5.6 * minute / 60, 35)
         assert HEATING_TYPE not in sim.active()
-    # Passou da referência: volta a avaliar.
-    sim.run(16, lambda minute: 55 + 5.6 * minute / 60, 35)
+    # Passou da referência: volta a avaliar, com a queda contada como patamar na janela da inclinação.
+    sim.run(40, lambda minute: 55 + 5.6 * minute / 60, 35)
     assert HEATING_TYPE in sim.active()
 
 
@@ -543,6 +543,28 @@ def test_below_range_uses_the_calculated_grace(unit_id):
     sim.skip(60)
     sim.run(35, 30, 90)
     assert sim.active()[BELOW_RANGE_TYPE].threshold == 33
+
+
+def test_below_range_does_not_reopen_while_recovering(unit_id):
+    # Estufa em 14/11/2026: depois da lenha, a janela de 30 min ainda estava abaixo e os últimos minutos já acima;
+    # o alerta abria e fechava a cada leitura.
+    sim = after_grace(unit_id, "Secagem do talo", 62, 25, hours=14)
+    sim.run(40, 56, 25)
+    assert BELOW_RANGE_TYPE in sim.active()
+    sim.run(6, lambda minute: 56 + 5 * minute / 6, 25)
+    sim.run(10, 61, 25)
+    assert BELOW_RANGE_TYPE not in sim.active()
+    assert len([alert for alert in sim.all_alerts() if alert.type == BELOW_RANGE_TYPE]) == 1
+
+
+def test_below_range_waits_while_the_temperature_rises(unit_id):
+    sim = after_grace(unit_id, "Secagem do talo", 62, 25, hours=14)
+    sim.run(15, 55, 25)
+    # Lenha: ainda abaixo do piso (58 °C), mas subindo; sem ela, o alerta abriria por volta dos 24 min.
+    sim.run(12, lambda minute: 55 + 2.5 * minute / 12, 25)
+    assert BELOW_RANGE_TYPE not in sim.active()
+    sim.run(15, 57.5, 25)
+    assert BELOW_RANGE_TYPE in sim.active()
 
 
 def test_heating_limit_depends_on_the_phase(unit_id):
