@@ -26,7 +26,7 @@
     Os parametros LoRa devem ser IDENTICOS no sender.
     =============================== */
 
-    #define RF_FREQUENCY           915000000
+    #define RF_FREQUENCY           915200000
     #define TX_OUTPUT_POWER        20
     #define LORA_BANDWIDTH         0
     #define LORA_SPREADING_FACTOR  7
